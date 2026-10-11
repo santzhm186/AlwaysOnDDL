@@ -1,5 +1,6 @@
-# IronWill · Windows 0.1.4 / Android 0.1.1
+# IronWill · Windows 0.1.4 / Android 0.1.1  ---------"This tool launches psychological assaults on the user to break procrastination, distraction, and evasive behaviors."
 本工具尝试精神攻击用户，解决用户的拖延，分心，逃避等低效行为。
+
 
 这是可运行的个人测试版：Windows 负责三档监督与可选灰区 AI；Android 负责应用级轻提醒、通知和局域网联动。目标、现实处境、拖延后果与誓言由你填写，程序引用原话。执行周期由你开始、暂停、继续和结束，没有固定每日起止时间。
 
