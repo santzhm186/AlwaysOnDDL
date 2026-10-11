@@ -138,6 +138,7 @@ class IronWillApp:
         self.text_fields: dict[str, tk.Text] = {}
         self.rule_fields: dict[str, tk.Text] = {}
         self.numeric_fields: dict[str, tk.StringVar] = {}
+        self.copy_buttons: dict[str, ttk.Button] = {}
         self._style()
         self._build()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
@@ -223,6 +224,7 @@ class IronWillApp:
             ttk.Label(outer, text="安全体验：不读取窗口、不联网、不锁屏、不写入个人配置。", style="Warning.TLabel").pack(fill="x", pady=(0, 10))
         notebook = ttk.Notebook(outer)
         notebook.pack(fill="both", expand=True)
+        notebook.enable_traversal()
         self.notebook = notebook
         mission, rules, connections = ScrollFrame(notebook), ScrollFrame(notebook), ScrollFrame(notebook)
         notebook.add(mission, text="当前周期")
@@ -544,7 +546,9 @@ class IronWillApp:
         ]):
             ttk.Label(details, text=title).grid(row=row, column=0, sticky="w", padx=(0, 12), pady=5)
             ttk.Entry(details, textvariable=var, state="readonly").grid(row=row, column=1, sticky="ew", pady=5)
-            ttk.Button(details, text="复制", command=lambda item=copy_key: self.copy_pairing(item)).grid(row=row, column=2, padx=(8, 0), pady=5)
+            btn = ttk.Button(details, text="复制", command=lambda item=copy_key: self.copy_pairing(item))
+            btn.grid(row=row, column=2, padx=(8, 0), pady=5)
+            self.copy_buttons[copy_key] = btn
         self.show_token_button = ttk.Button(parent, text="显示口令", command=self.toggle_pair_secret)
         self.show_token_button.grid(row=5, column=0, sticky="e", pady=(4, 8))
         self.peers_value = tk.StringVar(value="手机：尚未连接")
@@ -1514,6 +1518,10 @@ class IronWillApp:
         self.root.clipboard_clear()
         self.root.clipboard_append(value)
         self.relay_status.set("已复制%s。" % {"address": "连接地址", "token": "设备口令，请只交给要配对的手机", "fingerprint": "证书指纹"}[key])
+        if key in self.copy_buttons:
+            btn = self.copy_buttons[key]
+            btn.configure(text="已复制")
+            self.root.after(1500, lambda: (btn.configure(text="复制") if btn.winfo_exists() else None))
 
     def close(self) -> None:
         if self.closing:
