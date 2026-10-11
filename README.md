@@ -20,6 +20,15 @@
 
 从0.1或0.1.1升级：先退出旧窗口，再打开上面的固定入口。默认继续使用`%LOCALAPPDATA%\IronWill`，目标、誓言、规则及周期快照无需重填；以前使用自定义`--data-dir`的用户继续使用同一目录。以后固定入口仍是`IronWill.exe`，版本号显示在窗口标题中。升级不自动开启监督或发送AI请求。
 
+## 快速开始
+
+本机运行桌面端：
+```bash
+cd desktop
+pip install -r requirements.txt
+python run.py
+```
+
 ## 先用 Windows
 
 1. 双击 EXE，无需安装 Python。打开界面本身不会开始监督。
