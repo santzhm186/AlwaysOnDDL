@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv*/
+build/
+dist/
+*.keystore
+*.jks
+*.key
+*.crt
+token.txt
+*.dpapi
+deepseek_key.txt
+secrets/
+local.properties
+*.log
+*.spec
