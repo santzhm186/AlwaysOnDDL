@@ -1,6 +1,8 @@
-# IronWill Android 0.1
+# IronWill Android 0.1.1
 
 这是可自行安装的原生 Android 第一版。使用 Java + 系统 UI，运行时没有第三方库，也没有云端模型。所有输入默认空白。契约、主线、处境、后果、红线应用和最近 200 条记录保存在应用私有存储。
+
+0.1.1仅增加GPLv3版权及“关于与许可”离线入口，assets/LICENSE与工程根目录全文相同。版本号0.1.1、versionCode 2，监测规则与权限不变。许可见[../LICENSE](../LICENSE)，数据说明见[../PRIVACY.md](../PRIVACY.md)。
 
 ## 已实现
 
@@ -16,7 +18,7 @@
 
 ## 安装后开始
 
-1. 安装 `IronWill-Android-0.1.apk` 并打开。
+1. 安装 `IronWill-Android-0.1.1.apk` 并打开。
 2. 填写承诺与当前主线；处境、后果可选，仅保留在手机。
 3. 选择至少一个红线应用。
 4. 打开“通知权限与提醒测试”，允许通知并确认渠道开启。
@@ -42,7 +44,7 @@ pwsh -File .\build.ps1 -AndroidSdk "C:\path\to\Android\SDK" -JavaHome "C:\path\t
 pwsh -File .\test.ps1 -JavaHome "C:\path\to\JDK"
 ```
 
-也可以设置 `ANDROID_SDK_ROOT` 与 `JAVA_HOME` 后直接运行 `build.ps1`。脚本还会尝试本机已有的 Unity AndroidPlayer SDK，但其路径不是唯一选项。输出为 `build/IronWill-Android-0.1.apk`，脚本运行 apksigner 验证并输出 SHA-256。
+也可以设置 `ANDROID_SDK_ROOT` 与 `JAVA_HOME` 后直接运行 `build.ps1`。脚本还会尝试本机已有的 Unity AndroidPlayer SDK，但其路径不是唯一选项。输出为 `build/IronWill-Android-0.1.1.apk`，脚本运行 apksigner 验证并输出 SHA-256。
 
 构建脚本在 `build/ironwill-development.jks` 创建公开密码的**开发签名**，用于个人测试；保留该文件可在当前安装上覆盖升级。它不适合商店正式发行，也不要用于其他产品。需要正式发行时换成私有发布签名并设计迁移；修改签名后 Android 通常不能直接覆盖已有安装。脚本不依赖 Gradle 网络下载。Gradle 工程文件供 IDE 使用，尚未单独执行 Gradle 构建验证。
 

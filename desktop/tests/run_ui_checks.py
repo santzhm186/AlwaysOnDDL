@@ -1,3 +1,5 @@
+# Copyright (C) 2026 IronWill contributors
+# SPDX-License-Identifier: GPL-3.0-only
 """Run only hidden, stubbed UI boundary tests from any working directory."""
 
 from pathlib import Path

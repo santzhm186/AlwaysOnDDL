@@ -1,13 +1,17 @@
+# Copyright (C) 2026 IronWill contributors
+# SPDX-License-Identifier: GPL-3.0-only
 import json
+import socket
 import ssl
 import tempfile
+import time
 import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
-from ironwill.relay import RelayServer
+from ironwill.relay import RelayServer, MAX_CONNECTIONS
 
 
 class RelayTests(unittest.TestCase):
@@ -106,6 +110,37 @@ class RelayTests(unittest.TestCase):
         after = self.relay.start()
         self.assertEqual(before["fingerprint"], after["fingerprint"])
         self.assertEqual(before["token"], after["token"])
+
+    def test_non_string_actions_are_rejected_without_commands(self):
+        for action in ([], {}, 3, None):
+            with self.assertRaises(urllib.error.HTTPError) as error:
+                self.request("/v1/action", {"device_id": "phone", "command_id": "bad",
+                    "session_id": "cycle-1", "action": action})
+            self.assertEqual(error.exception.code, 400)
+            error.exception.close()
+        self.assertEqual(self.relay.drain_commands(), [])
+
+    def test_idle_tls_connections_are_bounded_and_service_recovers(self):
+        sockets = []
+        try:
+            for _ in range(MAX_CONNECTIONS):
+                sockets.append(socket.create_connection(("127.0.0.1", self.relay.port), timeout=2))
+            deadline = time.monotonic() + 2
+            while self.relay._server._request_slots._value and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(self.relay._server._request_slots._value, 0)
+            with socket.create_connection(("127.0.0.1", self.relay.port), timeout=2) as excess:
+                try:
+                    self.assertEqual(excess.recv(1), b"")
+                except ConnectionResetError:
+                    pass
+        finally:
+            for connection in sockets:
+                connection.close()
+        deadline = time.monotonic() + 2
+        while self.relay._server._request_slots._value < MAX_CONNECTIONS and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(self.request("/v1/state")[0], 200)
 
 
 if __name__ == "__main__":

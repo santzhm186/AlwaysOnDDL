@@ -1,3 +1,5 @@
+# Copyright (C) 2026 IronWill contributors
+# SPDX-License-Identifier: GPL-3.0-only
 """Opt-in, certificate-pinned HTTPS relay for a trusted local network.
 
 The relay carries an explicitly shared goal, oath and small device status only.
@@ -21,8 +23,44 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 MAX_BODY = 16384
+MAX_CONNECTIONS = 16
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 _ACTIONS = {"BACK", "WORTH", "BREATHE", "PAUSE", "RESUME"}
+
+
+class _BoundedHTTPServer(ThreadingHTTPServer):
+    """Bound TLS handshakes and HTTP workers, including unauthenticated peers."""
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(self, *args, **kwargs):
+        self._request_slots = threading.BoundedSemaphore(MAX_CONNECTIONS)
+        super().__init__(*args, **kwargs)
+
+    def get_request(self):
+        sock, address = self.socket.accept()
+        sock.settimeout(5)
+        return sock, address
+
+    def process_request(self, request, client_address):
+        if not self._request_slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._request_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._request_slots.release()
+
+    def handle_error(self, request, client_address):
+        # Malformed/abandoned connections must not dump tracebacks or peer data.
+        pass
 
 
 def _atomic_text(path: Path, value: str) -> None:
@@ -162,17 +200,8 @@ class RelayServer:
                     except (ValueError, UnicodeError, TimeoutError):
                         self.reply(400, {"error": "invalid_request"})
 
-            # TLS handshake must not stall the accept loop; ThreadingHTTPServer
-            # hands each accepted TLS socket to a bounded-time request handler.
-            class LocalHTTPServer(ThreadingHTTPServer):
-                daemon_threads = True
-                allow_reuse_address = True
-                def get_request(inner):
-                    sock, address = inner.socket.accept()
-                    sock.settimeout(5)
-                    return sock, address
-
-            server = LocalHTTPServer((self.host, self.port), Handler)
+            # TLS handshakes happen in bounded, timed workers, never the accept loop.
+            server = _BoundedHTTPServer((self.host, self.port), Handler)
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             context.minimum_version = ssl.TLSVersion.TLSv1_2
             context.load_cert_chain(str(cert), str(key))
@@ -263,7 +292,7 @@ class RelayServer:
                 return 200, {"ok": True}
             if path == "/v1/action":
                 action, command_id = body.get("action"), body.get("command_id", "")
-                if action not in _ACTIONS or not isinstance(command_id, str) or not _ID.fullmatch(command_id):
+                if not isinstance(action, str) or action not in _ACTIONS or not isinstance(command_id, str) or not _ID.fullmatch(command_id):
                     return 400, {"error": "invalid_action"}
                 session_id = body.get("session_id")
                 if not isinstance(session_id, str) or not session_id or session_id != self._desktop.get("id"):

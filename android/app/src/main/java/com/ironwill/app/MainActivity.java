@@ -1,3 +1,5 @@
+// Copyright (C) 2026 IronWill contributors
+// SPDX-License-Identifier: GPL-3.0-only
 package com.ironwill.app;
 
 import android.Manifest;
@@ -63,8 +65,9 @@ public final class MainActivity extends Activity {
         button("活动感知权限", this::observationOptions, false);
         button("电脑配对与任务导入（可选）", this::computerOptions, false);
         button("本地记录", () -> showText("本地记录", store.history()), false);
+        button("关于与许可", this::showLicense, false);
         button("手动锁屏能力测试（一次）", this::testLock, false);
-        label("第一版 · 0.1.0\n无固定作息 · 默认不锁屏 · 不采集正文\n自动强约束与终局尚未启用。系统可停止后台服务；应用会如实显示可用能力。", 12, MUTED, false);
+        label("个人测试版 · 0.1.1\n无固定作息 · 默认不锁屏 · 不采集正文\n自动强约束与终局尚未启用。系统可停止后台服务；应用会如实显示可用能力。", 12, MUTED, false);
     }
     private int dp(int n) { return Math.round(n * getResources().getDisplayMetrics().density); }
     private TextView label(String value, int size, int color, boolean bold) {
@@ -256,6 +259,22 @@ public final class MainActivity extends Activity {
     private String friendly(Exception e) {
         if (e instanceof javax.net.ssl.SSLException) return "证书验证失败，请核对电脑指纹与时间。";
         String m = e.getMessage(); return m == null ? "连接不可用，请检查电脑服务与网络。" : m;
+    }
+    private void showLicense() {
+        String notice = "IronWill / AlwaysOnDDL\nCopyright (C) 2026 IronWill contributors\nGPL-3.0-only\n\n"
+                + "可按 GNU GPL 第 3 版使用、修改和再分发。本程序不提供任何担保。\n"
+                + "源码及构建说明：https://github.com/santzhm186/AlwaysOnDDL\n\n";
+        try (java.io.InputStream input = getAssets().open("LICENSE")) {
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[4096]; int count;
+            while ((count = input.read(buffer)) != -1) {
+                if (bytes.size() + count > 100000) throw new java.io.IOException("License oversized");
+                bytes.write(buffer, 0, count);
+            }
+            showText("关于与许可", notice + bytes.toString("UTF-8"));
+        } catch (java.io.IOException e) {
+            showText("关于与许可", notice + "许可资源无法读取，请从源码仓库的 LICENSE 文件查看全文。");
+        }
     }
     private void showText(String title, String text) {
         ScrollView s = new ScrollView(this); TextView t = new TextView(this); t.setText(text); t.setTextIsSelectable(true); t.setPadding(dp(22), dp(12), dp(22), dp(12)); s.addView(t);

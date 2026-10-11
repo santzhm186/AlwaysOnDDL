@@ -1,3 +1,5 @@
+// Copyright (C) 2026 IronWill contributors
+// SPDX-License-Identifier: GPL-3.0-only
 package com.ironwill.app;
 
 import android.accessibilityservice.AccessibilityService;

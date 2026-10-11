@@ -1,3 +1,5 @@
+# Copyright (C) 2026 IronWill contributors
+# SPDX-License-Identifier: GPL-3.0-only
 """HTTP is mocked; these tests never send private observations anywhere."""
 import io
 import json
@@ -136,6 +138,72 @@ class AITests(unittest.TestCase):
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
+
+    @patch("ironwill.ai._open_request")
+    def test_audit_pairs_real_request_response_without_headers_or_key(self, call):
+        events = []
+        call.return_value = reply('{"verdict":"related","reason":"相关 test-only"}')
+        result = self.client.advise("goal", "browser", "page", audit=events.append)
+        self.assertTrue(result["available"])
+        self.assertEqual([event["event"] for event in events], ["ai_request", "ai_response"])
+        self.assertEqual(events[0]["details"]["request_id"], events[1]["details"]["request_id"])
+        self.assertEqual(events[0]["details"]["request_body"]["model"], "test-model")
+        self.assertIn("response_body", events[1]["details"])
+        self.assertEqual(events[1]["details"]["http_status"], 200)
+        self.assertGreaterEqual(events[1]["details"]["duration_ms"], 0)
+        serialized = json.dumps(events)
+        self.assertNotIn("test-only", serialized)
+        self.assertNotIn("Authorization", serialized)
+
+    @patch("ironwill.ai._open_request")
+    def test_cache_audit_never_implies_second_network_request(self, call):
+        events = []
+        call.return_value = reply('{"verdict":"related","reason":"相关"}')
+        self.client.advise("goal", "browser", "page", audit=events.append)
+        self.client.advise("goal", "browser", "page", audit=events.append)
+        self.assertEqual([event["event"] for event in events], ["ai_request", "ai_response", "ai_cache"])
+        self.assertTrue(events[-1]["details"]["result"]["cached"])
+        self.assertEqual(call.call_count, 1)
+
+    @patch("ironwill.ai._open_request")
+    def test_private_audit_has_no_observation_data(self, call):
+        events = []
+        self.client.advise("private goal", "browser", "password: PRIVATE-CONTENT", audit=events.append)
+        self.assertEqual(events[0]["event"], "ai_skipped")
+        self.assertNotIn("PRIVATE-CONTENT", str(events))
+        self.assertNotIn("private goal", str(events))
+        call.assert_not_called()
+
+    @patch("ironwill.ai._open_request", side_effect=TimeoutError)
+    def test_timeout_has_communication_failure_with_duration(self, call):
+        events = []
+        result = self.client.advise("goal", "browser", "page", audit=events.append)
+        self.assertFalse(result["available"])
+        self.assertEqual(events[-1]["details"]["result"]["error_code"], "timeout")
+        self.assertIn("duration_ms", events[-1]["details"])
+
+    @patch("ironwill.ai._open_request")
+    def test_malformed_response_is_visible_but_not_used_as_verdict(self, call):
+        events = []
+        call.return_value = io.BytesIO(b"not JSON")
+        result = self.client.advise("goal", "browser", "page", audit=events.append)
+        self.assertEqual(result["error_code"], "invalid_response")
+        self.assertEqual(events[-1]["details"]["response_body"], "not JSON")
+
+    @patch("ironwill.ai._open_request")
+    def test_http_error_body_is_excluded_from_communication_log(self, call):
+        events = []
+        call.side_effect = urllib.error.HTTPError("https://example.invalid", 401, "private", {}, io.BytesIO(b"private-error-body"))
+        self.client.advise("goal", "browser", "page", audit=events.append)
+        self.assertEqual(events[-1]["details"]["http_status"], 401)
+        self.assertNotIn("private-error-body", str(events))
+
+    @patch("ironwill.ai._open_request")
+    def test_audit_failure_cannot_change_model_result(self, call):
+        call.return_value = reply('{"verdict":"related","reason":"相关"}')
+        def broken(_):
+            raise OSError("diagnostic unavailable")
+        self.assertTrue(self.client.advise("goal", "browser", "page", audit=broken)["available"])
 
 
 if __name__ == "__main__":

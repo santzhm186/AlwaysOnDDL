@@ -1,3 +1,5 @@
+# Copyright (C) 2026 IronWill contributors
+# SPDX-License-Identifier: GPL-3.0-only
 """Platform fallback tests never call LockWorkStation."""
 import unittest
 from unittest.mock import patch

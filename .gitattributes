@@ -1,0 +1,5 @@
+* text=auto
+# Preserve verbatim third-party legal texts and identical Android GPL asset.
+licenses/** -text -whitespace
+LICENSE -text -whitespace
+android/app/src/main/assets/LICENSE -text -whitespace

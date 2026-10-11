@@ -1,3 +1,5 @@
+# Copyright (C) 2026 IronWill contributors
+# SPDX-License-Identifier: GPL-3.0-only
 """Hidden desktop integration checks. No real observation, network, or lock calls."""
 
 import json
@@ -191,8 +193,9 @@ class DesktopBoundaryTests(unittest.TestCase):
         self.app.ai_key.set("NOT-A-REAL-SECRET-FOR-TEST")
         self.app.apply_ai()
         self.assertIsNotNone(self.app.ai)
-        for path in self.directory.iterdir():
-            self.assertNotIn("NOT-A-REAL-SECRET-FOR-TEST", path.read_text(encoding="utf-8"))
+        for path in self.directory.rglob("*"):
+            if path.is_file():
+                self.assertNotIn("NOT-A-REAL-SECRET-FOR-TEST", path.read_text(encoding="utf-8"))
         self.app.ai_enabled.set(False)
         self.app._ai_permission_changed()
         self.assertIsNone(self.app.ai)
@@ -277,6 +280,8 @@ class DesktopBoundaryTests(unittest.TestCase):
         self.app.ai = Mock()
         self.app.ai.advise.return_value = self.result()
         self.sample_mock.return_value = Observation(process="browser.exe", title="unlisted entertainment page")
+        import time
+        self.app.ai_candidate = ("browser.exe", "unlisted entertainment page", time.monotonic() - 4)
         def immediate_thread(target, **_):
             return Mock(start=target)
         with patch("ironwill.app.threading.Thread", side_effect=immediate_thread):
@@ -434,6 +439,252 @@ class DesktopBoundaryTests(unittest.TestCase):
             self.app.import_legacy_key()
         picker.assert_not_called()
         self.assertEqual(self.app.ai_key.get(), "")
+
+    def test_log_page_filters_details_persists_and_exports(self):
+        self.assertEqual(len(self.app.notebook.tabs()), 4)
+        self.app._log("判断", "observation", "主线判断", {"title": "unique-title"})
+        self.app._log("AI通信", "ai_request", "请求", {"request_body": {"model": "demo"}})
+        self.app._refresh_logs()
+        self.assertEqual(len(self.app.log_tree.get_children()), 2)
+        self.app.log_filter.set("判断")
+        self.app.log_search.set("unique-title")
+        self.assertEqual(len(self.app.log_tree.get_children()), 1)
+        self.assertIn("unique-title", self.app.log_detail.get("1.0", "end"))
+        destination = self.directory / "export.jsonl"
+        with patch("ironwill.app.filedialog.asksaveasfilename", return_value=str(destination)):
+            self.app.export_logs()
+        self.assertEqual(len(destination.read_text(encoding="utf-8").splitlines()), 1)
+        from ironwill.activity_log import ActivityLog
+        self.assertEqual(len(ActivityLog(self.directory).entries), 2)
+
+    def test_observation_logs_deduplicate_and_hide_private_content(self):
+        self.begin()
+        observation = Observation(process="browser", title="test page")
+        self.app._record_observation(observation, 1)
+        count = len(self.app.journal.entries)
+        self.app._record_observation(observation, 1)
+        self.assertEqual(len(self.app.journal.entries), count)
+        self.app._last_decision_time -= 61
+        self.app._record_observation(observation, 1)
+        self.assertEqual(len(self.app.journal.entries), count + 1)
+        self.app._record_observation(Observation(process="PRIVATE-PROCESS", title="password: PRIVATE-LOG-TITLE"), 1)
+        entry = self.app.journal.entries[-1]
+        self.assertNotIn("PRIVATE-LOG-TITLE", str(entry))
+        self.assertNotIn("PRIVATE-PROCESS", str(entry))
+        self.assertIn("隐私", entry["summary"])
+
+    def test_observation_log_explains_rule_and_sampling_gap(self):
+        self.begin()
+        self.app._record_observation(Observation(process="game.exe", title="test game"), 1)
+        entry = self.app.journal.entries[-1]
+        self.assertIn("红线", entry["summary"])
+        self.assertEqual(entry["details"]["matched_rules"]["blocked_processes"], ["game.exe"])
+        self.app._record_observation(Observation(process="game.exe", title="test game"), 45)
+        self.assertIn("断档", self.app.journal.entries[-1]["summary"])
+
+    def test_stale_results_are_logged_without_becoming_current_judgment(self):
+        self.begin()
+        self.app.ai = Mock()
+        self.app.last_observation = Observation(process="browser", title="test")
+        self.deliver_ai(generation=self.app.ai_generation - 1)
+        entry = self.app.journal.entries[-1]
+        self.assertIn("过期", entry["summary"])
+        self.assertFalse(entry["details"]["accepted"])
+        self.assertIsNone(self.app.semantic_result)
+
+    def test_real_ai_audit_records_request_response_and_connection_test(self):
+        import io
+        self.configure_key()
+        self.app.apply_ai()
+        response = {"choices": [{"message": {"content": '{"verdict":"unknown","reason":"synthetic test"}'}}]}
+        def immediate_thread(target, **_):
+            return Mock(start=target)
+        with patch("ironwill.app.threading.Thread", side_effect=immediate_thread), patch(
+                "ironwill.ai._open_request", return_value=io.BytesIO(json.dumps(response).encode())):
+            self.app.test_ai_connection()
+        self.app._drain_results()
+        communication = [entry for entry in self.app.journal.entries if entry["category"] == "AI通信"]
+        self.assertEqual([entry["event"] for entry in communication], ["ai_request", "ai_response"])
+        self.assertEqual(communication[0]["details"]["purpose"], "虚拟连接测试")
+        self.assertIn("ironwill-connection-test", str(communication[0]))
+        self.assertNotIn("SYNTHETIC-NOT-A-REAL-KEY", str(list(self.app.journal.entries)))
+        self.sample_mock.assert_not_called()
+
+    def test_clear_logs_preserves_cycle_and_ignores_already_queued_audit(self):
+        self.begin()
+        before = self.app.engine.snapshot()
+        callback = self.app._audit_callback(self.app.ai_generation, self.app.engine.state["id"], self.app._log_epoch, "测试")
+        callback({"event": "ai_response", "summary": "cleared-old-response", "details": {}})
+        with patch("ironwill.app.messagebox.askyesno", return_value=True):
+            self.app.clear_logs()
+        self.app._drain_results()
+        self.assertEqual(list(self.app.journal.entries), [])
+        self.assertEqual(before, self.app.engine.snapshot())
+        self.assertTrue(self.app.settings_path.exists())
+
+    def test_logging_disk_failure_does_not_change_supervision_state(self):
+        self.begin()
+        before = self.app.engine.snapshot()
+        with patch("ironwill.activity_log.Path.open", side_effect=PermissionError):
+            self.app._log("判断", "test", "内存日志")
+        self.assertEqual(before, self.app.engine.snapshot())
+        self.assertIn("未能保存", self.app.journal.warning)
+
+    def test_tray_hides_only_after_ready_and_does_not_pause_cycle(self):
+        self.begin()
+        before = self.app.engine.snapshot()
+        native = Mock(ready=False)
+        native.start.return_value = True
+        with patch("ironwill.tray_windows.WindowsTray", return_value=native), patch.object(self.root, "withdraw") as hide:
+            self.app.minimize_to_tray()
+            hide.assert_not_called()
+            self.app._tray_event("ready")
+            hide.assert_called_once()
+        self.assertEqual(before, self.app.engine.snapshot())
+        with patch.object(self.app, "restore_window") as restore:
+            self.app._tray_event("restore")
+            restore.assert_called_once()
+        self.assertEqual(before, self.app.engine.snapshot())
+
+    def test_tray_failure_keeps_window_available_and_exit_uses_normal_close(self):
+        native = Mock(ready=False)
+        native.start.return_value = False
+        with patch("ironwill.tray_windows.WindowsTray", return_value=native), patch.object(
+                self.app, "restore_window") as restore, patch.object(self.root, "withdraw") as hide:
+            self.app.minimize_to_tray()
+            restore.assert_called_once()
+            hide.assert_not_called()
+        self.assertIsNone(self.app.tray)
+        self.assertIn("保持可见", self.app.status_text.get())
+        with patch.object(self.app, "restore_window") as restore, patch.object(self.app, "close") as close:
+            self.app._tray_event("exit")
+            restore.assert_called_once()
+            close.assert_called_once()
+
+    def test_tray_exit_during_poll_stops_timer_before_touching_destroyed_ui(self):
+        self.begin()
+        native = self.app.tray = Mock()
+        self.app.events.put(("tray", "exit"))
+        with patch("ironwill.app.messagebox.askyesno", return_value=True), patch.object(
+                self.root, "destroy") as destroy, patch.object(self.app, "restore_window"), patch.object(
+                self.app, "_poll_relay") as relay_poll:
+            self.app._poll()
+            destroy.assert_called_once()
+            relay_poll.assert_not_called()
+        self.assertTrue(self.app.closing)
+        self.assertEqual(self.app.engine.state["status"], "ended")
+        self.sample_mock.assert_not_called()
+        native.stop.assert_called_once()
+
+    def test_cycle_memory_avoids_worker_calls_and_reuses_after_pause(self):
+        self.begin()
+        self.app.ai = Mock()
+        observation = Observation(process="browser", title="already reviewed")
+        identity = self.app._review_identity(observation.process, observation.title)
+        self.app.review_memory.remember(identity, self.app.engine.state["id"], self.result("related"))
+        with patch("ironwill.app.threading.Thread") as worker:
+            for _ in range(100):
+                self.app._request_ai(observation)
+            worker.assert_not_called()
+        self.assertEqual(self.app.ai_cache_hits, 1)
+        self.assertEqual(self.app.ai_api_count, 0)
+        self.assertEqual(self.app.semantic_result[2], "related")
+        self.app.pause_resume()
+        self.app.pause_resume()
+        with patch("ironwill.app.threading.Thread") as worker:
+            self.app._request_ai(observation)
+            worker.assert_not_called()
+        self.assertEqual(self.app.semantic_result[2], "related")
+
+    def test_new_window_needs_stable_dwell_and_network_interval(self):
+        import time
+        self.begin()
+        self.app.ai = Mock()
+        observation = Observation(process="browser", title="new page")
+        with patch("ironwill.app.threading.Thread") as worker:
+            self.app._request_ai(observation)
+            worker.assert_not_called()
+            self.app.ai_candidate = (observation.process, observation.title, time.monotonic() - 4)
+            self.app.ai_last_request = time.monotonic()
+            self.app._request_ai(observation)
+            worker.assert_not_called()
+            self.app.ai_last_request -= 31
+            self.app._request_ai(observation)
+            worker.assert_called_once()
+
+    def test_failed_request_backoff_and_new_cycle_reset(self):
+        import time
+        self.begin()
+        self.app.ai = Mock()
+        self.app.last_observation = observation = Observation(process="browser", title="failed page")
+        self.deliver_ai(available=False)
+        identity = self.app._review_identity(observation.process, observation.title)
+        self.assertIsNone(self.app.review_memory.lookup(identity, self.app.engine.state["id"]))
+        self.assertEqual(self.app.ai_failures[identity][0], 1)
+        self.app.ai_candidate = (observation.process, observation.title, time.monotonic() - 4)
+        self.app.ai_last_request = 0
+        with patch("ironwill.app.threading.Thread") as worker:
+            self.app._request_ai(observation)
+            worker.assert_not_called()
+        self.assertIn("退避", self.app.ai_wait_reason)
+        self.app.review_memory.remember(identity, self.app.engine.state["id"], self.result("related"))
+        self.app.end()
+        self.assertEqual(len(self.app.review_memory.entries), 0)
+        self.assertEqual(self.app.ai_failures, {})
+
+    def test_expired_memory_cannot_keep_refreshing_old_semantic_result(self):
+        import time
+        self.begin()
+        self.app.ai = Mock()
+        observation = Observation(process="browser", title="old page")
+        identity = self.app._review_identity(observation.process, observation.title)
+        self.app.review_memory.remember(identity, self.app.engine.state["id"], self.result("related"))
+        self.app.review_memory.entries[identity]["created_at"] -= 901
+        self.app.active_cache_mode = "15分钟"
+        self.app.semantic_result = (observation.process, observation.title, "related", time.monotonic())
+        self.app._request_ai(observation)
+        self.assertIsNone(self.app.semantic_result)
+
+    def test_restarted_paused_cycle_can_reuse_persisted_judgment(self):
+        self.begin()
+        self.configure_key()
+        self.app.apply_ai()
+        observation = Observation(process="browser", title="persisted page")
+        identity = self.app._review_identity(observation.process, observation.title)
+        self.app.review_memory.remember(identity, self.app.engine.state["id"], self.result("related"))
+        reopened = IronWillApp(self.root, self.directory)
+        self.assertEqual(reopened.engine.state["status"], "paused")
+        reopened.ai_enabled.set(True)
+        reopened.ai_key.set("SYNTHETIC-NOT-A-REAL-KEY")
+        reopened.apply_ai()
+        reopened.pause_resume()
+        with patch("ironwill.app.threading.Thread") as worker:
+            reopened._request_ai(observation)
+            worker.assert_not_called()
+        self.assertEqual(reopened.semantic_result[2], "related")
+
+    def test_visiting_cached_window_restarts_new_window_dwell(self):
+        import time
+        self.begin()
+        self.app.ai = Mock()
+        first = Observation(process="browser", title="unreviewed")
+        cached = Observation(process="browser", title="reviewed")
+        identity = self.app._review_identity(cached.process, cached.title)
+        self.app.review_memory.remember(identity, self.app.engine.state["id"], self.result("related"))
+        self.app.ai_candidate = (first.process, first.title, time.monotonic() - 10)
+        self.app._request_ai(cached)
+        with patch("ironwill.app.threading.Thread") as worker:
+            self.app._request_ai(first)
+            worker.assert_not_called()
+        self.assertIn("稳定", self.app.ai_wait_reason)
+
+    def test_api_counter_counts_requests_not_responses_or_cache(self):
+        for event in ("ai_request", "ai_response", "ai_cache"):
+            self.app.events.put(("ai_audit", self.app.ai_generation, self.app.engine.state["id"],
+                                 self.app._log_epoch, "合成测试", {"event": event, "summary": "test", "details": {}}))
+        self.app._drain_results()
+        self.assertEqual(self.app.ai_api_count, 1)
+        self.assertEqual(self.app.ai_cache_hits, 0)
 
 
 if __name__ == "__main__":

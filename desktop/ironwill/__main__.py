@@ -1,3 +1,5 @@
+# Copyright (C) 2026 IronWill contributors
+# SPDX-License-Identifier: GPL-3.0-only
 """Explicit entry point; --help works without Tk, Windows APIs, or network access."""
 
 from __future__ import annotations
@@ -52,6 +54,13 @@ def main(argv: list[str] | None = None) -> int:
                     raise RuntimeError("DPAPI plaintext leak")
                 store.delete()
             result["dpapi_storage"] = True
+            from .legal import legal_text
+            notice = legal_text()
+            if not all(marker in notice for marker in ("GNU GENERAL PUBLIC LICENSE", "Python-LICENSE.txt",
+                    "cryptography-LICENSE.txt", "OpenSSL-LICENSE.txt", "PyInstaller-COPYING.txt",
+                    "Rust-THIRD-PARTY.txt", "cryptography-rust-components.json")):
+                raise RuntimeError("License resources missing")
+            result["license_resources"] = True
         except Exception as error:
             result = {"ok": False, "error_type": type(error).__name__, "error": str(error)}
         try:

@@ -1,3 +1,5 @@
+# Copyright (C) 2026 IronWill contributors
+# SPDX-License-Identifier: GPL-3.0-only
 """Package only the new project's source and documents; never include user data."""
 from __future__ import annotations
 
@@ -6,8 +8,8 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_VERSION = "0.1.2"
-SKIP_PARTS = {"build", "dist", "__pycache__", ".git", ".gradle", ".idea", ".venv", ".venv-build", "secrets", "pairing"}
+SOURCE_VERSION = "0.1.4"
+SKIP_PARTS = {"build", "dist", "__pycache__", ".git", ".gradle", ".idea", ".venv", ".venv-build", "secrets", "pairing", "logs"}
 SUFFIXES = {".py", ".java", ".md", ".txt", ".ps1", ".xml", ".gradle", ".properties"}
 
 
@@ -16,11 +18,11 @@ def source_files():
         relative = path.relative_to(ROOT)
         if not path.is_file() or any(part in SKIP_PARTS for part in relative.parts):
             continue
-        if path.name in {"token.txt", "local.properties", "deepseek_key.txt"}:
+        if path.name in {"token.txt", "local.properties", "deepseek_key.txt", "ai_judgments.json", "iron_will_config.json"} or path.name.startswith(".env"):
             continue
-        if path.suffix.lower() in {".dpapi", ".key", ".crt", ".jks", ".keystore"}:
+        if path.suffix.lower() in {".dpapi", ".key", ".crt", ".jks", ".keystore", ".pem", ".p12", ".pfx"}:
             continue
-        if path.suffix.lower() in SUFFIXES or path.name == ".gitignore" or relative.parts[0] == "licenses":
+        if path.suffix.lower() in SUFFIXES or path.name in {".gitignore", ".gitattributes", "LICENSE", "COPYRIGHT"} or relative.parts[0] == "licenses":
             yield path, relative
 
 
@@ -34,8 +36,14 @@ def main():
             output.write(path, str(Path("ironwill") / relative))
     with ZipFile(archive) as checked:
         assert checked.testzip() is None
-        assert all(not name.endswith((".dpapi", ".key", ".crt", ".jks", ".keystore", "token.txt", "deepseek_key.txt")) for name in checked.namelist())
-    names = ("IronWill.exe", f"IronWill-Windows-{SOURCE_VERSION}.exe", "IronWill-Android-0.1.apk", archive.name)
+        assert all(not name.endswith((".dpapi", ".key", ".crt", ".jks", ".keystore", ".jsonl", "token.txt", "deepseek_key.txt")) for name in checked.namelist())
+    versioned_name = f"IronWill-Windows-{SOURCE_VERSION}.exe"
+    names = [versioned_name, "IronWill-Android-0.1.1.apk", archive.name]
+    fixed = target / "IronWill.exe"
+    if fixed.is_file() and fixed.read_bytes() == (target / versioned_name).read_bytes():
+        names.insert(0, "IronWill.exe")
+    else:
+        print("Fixed executable differs from this release (it may be running); use the versioned EXE.")
     lines = []
     for name in names:
         artifact = target / name

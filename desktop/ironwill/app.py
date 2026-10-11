@@ -1,3 +1,5 @@
+# Copyright (C) 2026 IronWill contributors
+# SPDX-License-Identifier: GPL-3.0-only
 """Chinese Tk desktop UI. OS and network actions always require explicit user action."""
 
 from __future__ import annotations
@@ -22,6 +24,8 @@ from .core import Engine, Observation, Policy, classify, load_policy, load_snaps
 from . import platform_windows
 from . import __version__
 from .credentials import CredentialError, KeyStore, endpoint_identity, environment_key, read_legacy_key, validate_key
+from .activity_log import ActivityLog
+from .review_memory import ReviewMemory, CACHE_MODES, review_identity
 
 
 BG = "#111820"
@@ -76,6 +80,20 @@ class IronWillApp:
         self.snapshot_path = self.data_dir / "session.json"
         self.key_store = KeyStore(self.data_dir)
         self.runtime_key: tuple[str, str] | None = None
+        self.journal = ActivityLog(None if demo else self.data_dir)
+        self.review_memory = ReviewMemory(None if demo else self.data_dir)
+        self.ai_api_count = 0
+        self.ai_cache_hits = 0
+        self.ai_candidate = None
+        self.ai_failures = {}
+        self.ai_wait_reason = ""
+        self.active_cache_mode = "本工作周期"
+        self._log_epoch = 0
+        self._log_render_revision = -1
+        self._last_decision = None
+        self._last_decision_time = 0.0
+        self.tray = None
+        self.tray_starting = False
         self.events: queue.SimpleQueue = queue.SimpleQueue()
         self.closing = False
         self.timer_id: str | None = None
@@ -145,7 +163,7 @@ class IronWillApp:
             if not isinstance(value, dict):
                 raise ValueError("not an object")
             # Ignore unexpected fields, especially any accidentally retained secrets.
-            allowed = {"goal", "reality", "consequence", "oath", "signature", "ai_endpoint", "ai_model"}
+            allowed = {"goal", "reality", "consequence", "oath", "signature", "ai_endpoint", "ai_model", "ai_cache_mode"}
             return {key: item for key, item in value.items() if key in allowed and isinstance(item, str)}
         except Exception:
             self.load_warning = "个人设置无法读取，原文件没有改动。请检查数据目录后再保存。"
@@ -174,6 +192,9 @@ class IronWillApp:
         style.map("Primary.TButton", background=[("active", "#2c755f"), ("disabled", "#1b302b")])
         style.configure("TEntry", fieldbackground=FIELD, foreground=FG, insertcolor=FG, padding=7)
         style.map("TEntry", fieldbackground=[("readonly", FIELD)])
+        style.configure("TCombobox", fieldbackground=FIELD, background=PANEL, foreground=FG, arrowcolor=FG)
+        style.map("TCombobox", fieldbackground=[("readonly", FIELD)], foreground=[("readonly", FG)],
+                  selectbackground=[("readonly", FIELD)], selectforeground=[("readonly", FG)])
         style.configure("TCheckbutton", background=BG, foreground=FG)
         style.map("TCheckbutton", background=[("active", BG)])
         style.configure("TNotebook", background=BG, borderwidth=0)
@@ -181,6 +202,9 @@ class IronWillApp:
         style.map("TNotebook.Tab", background=[("selected", "#294034")], foreground=[("selected", FG)])
         style.configure("TLabelframe", background=BG, bordercolor="#33414f")
         style.configure("TLabelframe.Label", background=BG, foreground=FG)
+        style.configure("Treeview", background=FIELD, fieldbackground=FIELD, foreground=FG, rowheight=28)
+        style.configure("Treeview.Heading", background=PANEL, foreground=FG)
+        style.map("Treeview", background=[("selected", "#294f43")], foreground=[("selected", FG)])
 
     def _build(self) -> None:
         outer = ttk.Frame(self.root, padding=20)
@@ -191,6 +215,8 @@ class IronWillApp:
         ttk.Label(heading, text="决定由你作出，提醒按约执行。", style="Muted.TLabel").pack(side="left", padx=20)
         self.state_text = tk.StringVar(value="未开始")
         ttk.Label(heading, textvariable=self.state_text, style="Accent.TLabel").pack(side="right")
+        self.tray_button = ttk.Button(heading, text="最小化到托盘", command=self.minimize_to_tray)
+        self.tray_button.pack(side="right", padx=12)
         self.capability_text = tk.StringVar()
         ttk.Label(outer, textvariable=self.capability_text, style="Muted.TLabel", wraplength=940).pack(fill="x", pady=(9, 16))
         if self.demo:
@@ -202,14 +228,198 @@ class IronWillApp:
         notebook.add(mission, text="当前周期")
         notebook.add(rules, text="判定规则")
         notebook.add(connections, text="手机与 AI")
+        logs = ttk.Frame(notebook, padding=14)
+        notebook.add(logs, text="判断日志")
         self._build_mission(mission.body)
         self._build_rules(rules.body)
         self._build_connections(connections.body)
+        self._build_logs(logs)
         footer = ttk.Frame(outer)
-        footer.pack(fill="x", pady=(12, 0))
+        footer.pack(side="bottom", fill="x", pady=(12, 0), before=notebook)
         self.status_text = tk.StringVar(value="尚未开始。保存目标后，由你决定何时开始这个周期。")
-        ttk.Label(footer, textvariable=self.status_text, style="Muted.TLabel", wraplength=920).pack(anchor="w")
+        ttk.Button(footer, text="关于与许可", command=self.show_licenses).pack(side="right", padx=(10, 0))
+        ttk.Label(footer, textvariable=self.status_text, style="Muted.TLabel", wraplength=660).pack(side="left", fill="x", expand=True)
         self._refresh_status()
+
+    def show_licenses(self) -> None:
+        from .legal import legal_text
+        window = tk.Toplevel(self.root)
+        window.title("IronWill · 关于与许可")
+        window.geometry("780x600")
+        body = ttk.Frame(window, padding=15)
+        body.pack(fill="both", expand=True)
+        text = self._text(body, 20)
+        scroll = ttk.Scrollbar(body, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=scroll.set)
+        text.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        text.insert("1.0", legal_text())
+        text.configure(state="disabled")
+
+    def _build_logs(self, parent: ttk.Frame) -> None:
+        ttk.Label(parent, text="判断日志与 AI 通信", style="Heading.TLabel").pack(anchor="w")
+        ttk.Label(parent, text="点击条目查看详情。记录变化及每分钟的持续判断；AI 缓存与实际请求分别标明。\n"
+                  "日志仅保存在本机，隐私窗口不记标题，Key 不进入日志。最多两份各 2 MiB，页面显示最近 1000 条。",
+                  style="Muted.TLabel", wraplength=900).pack(anchor="w", pady=(5, 10))
+        toolbar = ttk.Frame(parent)
+        toolbar.pack(fill="x", pady=(0, 10))
+        self.log_filter = tk.StringVar(value="全部")
+        ttk.Combobox(toolbar, textvariable=self.log_filter, state="readonly", width=10,
+                     values=("全部", "判断", "AI通信", "程序")).pack(side="left")
+        ttk.Label(toolbar, text="搜索").pack(side="left", padx=(12, 6))
+        self.log_search = tk.StringVar()
+        ttk.Entry(toolbar, textvariable=self.log_search, width=21).pack(side="left", fill="x", expand=True)
+        self.log_follow = tk.BooleanVar(value=True)
+        ttk.Checkbutton(toolbar, text="跟随最新", variable=self.log_follow).pack(side="left", padx=8)
+        ttk.Button(toolbar, text="导出筛选结果", command=self.export_logs).pack(side="left", padx=(0, 6))
+        ttk.Button(toolbar, text="清空日志", command=self.clear_logs).pack(side="left")
+        panes = ttk.Panedwindow(parent, orient="vertical")
+        panes.pack(fill="both", expand=True)
+        upper, lower = ttk.Frame(panes), ttk.Frame(panes)
+        panes.add(upper, weight=2)
+        panes.add(lower, weight=3)
+        last_height = [0]
+        def size_panes(event):
+            if event.height > 160 and event.height != last_height[0]:
+                last_height[0] = event.height
+                panes.sashpos(0, max(70, int(event.height * 0.43)))
+        panes.bind("<Configure>", size_panes)
+        self.log_tree = ttk.Treeview(upper, columns=("time", "category", "summary"), show="headings", height=8)
+        for name, label, width in (("time", "时间", 165), ("category", "类别", 75), ("summary", "判断 / 通信摘要", 560)):
+            self.log_tree.heading(name, text=label)
+            self.log_tree.column(name, width=width, minwidth=60, stretch=name == "summary")
+        scrollbar = ttk.Scrollbar(upper, orient="vertical", command=self.log_tree.yview)
+        self.log_tree.configure(yscrollcommand=scrollbar.set)
+        self.log_tree.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        ttk.Label(lower, text="选中记录 · 详细内容", style="Muted.TLabel").pack(anchor="w", pady=(10, 5))
+        detail_body = ttk.Frame(lower)
+        detail_body.pack(fill="both", expand=True)
+        self.log_detail = self._text(detail_body, 8)
+        detail_scroll = ttk.Scrollbar(detail_body, orient="vertical", command=self.log_detail.yview)
+        self.log_detail.configure(yscrollcommand=detail_scroll.set, state="disabled")
+        self.log_detail.pack(side="left", fill="both", expand=True)
+        detail_scroll.pack(side="right", fill="y")
+        self.log_status = tk.StringVar()
+        ttk.Label(parent, textvariable=self.log_status, style="Muted.TLabel", wraplength=900).pack(anchor="w", pady=(8, 0))
+        self._visible_logs = {}
+        self.log_tree.bind("<<TreeviewSelect>>", lambda _event: self._show_log_detail())
+        self.log_filter.trace_add("write", lambda *_: self._refresh_logs(force=True))
+        self.log_search.trace_add("write", lambda *_: self._refresh_logs(force=True))
+        self._refresh_logs(force=True)
+
+    def _log(self, category: str, event: str, summary: str, details=None) -> None:
+        try:
+            self.journal.record(category, event, summary, details)
+        except Exception:
+            self.journal.warning = "日志记录暂时失败，监督规则保持原有行为。"
+
+    def _filtered_logs(self):
+        category, query = self.log_filter.get(), self.log_search.get().strip().casefold()
+        return [entry for entry in reversed(self.journal.entries)
+                if (category == "全部" or entry["category"] == category)
+                and (not query or query in json.dumps(entry, ensure_ascii=False).casefold())]
+
+    def _refresh_logs(self, force=False) -> None:
+        if not force and self._log_render_revision == self.journal.revision:
+            self.log_status.set(self.journal.warning or self.log_status.get())
+            return
+        selected = self.log_tree.selection()
+        entries = self._filtered_logs()
+        self._visible_logs = {entry["id"]: entry for entry in entries}
+        self.log_tree.delete(*self.log_tree.get_children())
+        for entry in entries:
+            self.log_tree.insert("", "end", iid=entry["id"], values=(
+                entry["timestamp"].replace("T", " ")[:19], entry["category"], entry["summary"]))
+        target = selected[0] if selected and selected[0] in self._visible_logs else None
+        if self.log_follow.get() and entries:
+            target = entries[0]["id"]
+        if target:
+            self.log_tree.selection_set(target)
+            self.log_tree.see(target)
+        self._show_log_detail()
+        self._log_render_revision = self.journal.revision
+        self.log_status.set(self.journal.warning or f"显示 {len(entries)} 条 / 最近 {len(self.journal.entries)} 条。时间使用本机时区；旧记录保留原时区。")
+
+    def _show_log_detail(self) -> None:
+        selected = self.log_tree.selection()
+        entry = self._visible_logs.get(selected[0]) if selected else None
+        text = "暂无记录。开始周期后会记录判断；连接测试也会产生 AI 通信记录。"
+        if entry:
+            details = dict(entry["details"])
+            request, response = details.pop("request_body", None), details.pop("response_body", None)
+            text = f"{entry['timestamp']}  ·  {entry['category']}  ·  {entry['event']}\n{entry['summary']}\n\n"
+            text += json.dumps(details, ensure_ascii=False, indent=2)
+            if request is not None:
+                text += "\n\n请求正文（已屏蔽凭据）\n" + json.dumps(request, ensure_ascii=False, indent=2)
+            if response is not None:
+                text += "\n\n服务返回正文（已屏蔽凭据，过长会截断）\n" + str(response)
+        self.log_detail.configure(state="normal")
+        self.log_detail.delete("1.0", "end")
+        self.log_detail.insert("1.0", text)
+        self.log_detail.configure(state="disabled")
+
+    def clear_logs(self) -> None:
+        if not messagebox.askyesno("清空日志", "删除本机保存的判断和 AI 通信日志？目标、规则、Key 与周期状态不受影响。", parent=self.root):
+            return
+        if self.journal.clear():
+            self._log_epoch += 1  # In-flight diagnostics cannot resurrect cleared history.
+            self._last_decision = None
+        self._refresh_logs(force=True)
+
+    def export_logs(self) -> None:
+        path = filedialog.asksaveasfilename(parent=self.root, title="导出当前筛选的日志", defaultextension=".jsonl",
+                                          initialfile="IronWill-logs.jsonl", filetypes=[("JSON Lines", "*.jsonl")])
+        if not path:
+            return
+        try:
+            text = "".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in reversed(self._filtered_logs()))
+            Path(path).write_text(text, encoding="utf-8")
+            self.log_status.set("已导出当前筛选结果。文件可能包含目标、非隐私标题与 AI 正文，请按个人资料保管。")
+        except OSError:
+            self.log_status.set("导出失败，请检查目标目录权限和磁盘空间。")
+
+    def minimize_to_tray(self) -> None:
+        if self.demo or not platform_windows.supported():
+            self.status_text.set("此模式不启用 Windows 托盘。")
+            return
+        if self.tray and self.tray.ready:
+            self.root.withdraw()
+            return
+        if self.tray_starting:
+            return
+        from .tray_windows import WindowsTray
+        self.tray_starting = True
+        self.tray_button.configure(state="disabled")
+        self.tray = WindowsTray(lambda event: self.events.put(("tray", event)))
+        if not self.tray.start():
+            self._tray_event("error")
+        else:
+            self.status_text.set("正在创建托盘图标；成功后窗口才隐藏。")
+
+    def restore_window(self) -> None:
+        self.root.deiconify()
+        self.root.lift()
+        self.root.focus_force()
+
+    def _tray_event(self, event) -> None:
+        self.tray_starting = False
+        self.tray_button.configure(state="normal")
+        if event == "ready":
+            self._log("程序", "tray_hidden", "主窗口已收起到托盘，当前周期状态保持不变")
+            self.status_text.set("已收起到托盘。点击右下角 IronWill 图标打开，右键可停止并退出。")
+            self.root.withdraw()
+        elif event == "restore":
+            self.restore_window()
+        elif event == "exit":
+            self.restore_window()
+            self.close()
+        elif event == "error":
+            if self.tray:
+                self.tray.stop()
+            self.tray = None
+            self.restore_window()
+            self.status_text.set("托盘不可用，主窗口保持可见；当前周期不受影响。")
 
     def _text(self, parent: tk.Misc, height: int = 3) -> tk.Text:
         return tk.Text(parent, height=height, bg=FIELD, fg=FG, insertbackground=FG,
@@ -377,6 +587,32 @@ class IronWillApp:
         key_buttons.grid(row=19, column=0, sticky="e")
         ttk.Button(key_buttons, text="从旧版 DeepSeek 文件导入", command=self.import_legacy_key).pack(side="left", padx=(0, 8))
         ttk.Button(key_buttons, text="删除已保存 Key", command=self.forget_saved_key).pack(side="left")
+        cache_controls = ttk.Frame(parent)
+        cache_controls.grid(row=20, column=0, sticky="ew", pady=(18, 5))
+        ttk.Label(cache_controls, text="已审核窗口复用期限").pack(side="left", padx=(0, 12))
+        configured_mode = self.settings.get("ai_cache_mode", "本工作周期")
+        self.ai_cache_mode = tk.StringVar(value=configured_mode if configured_mode in CACHE_MODES else "本工作周期")
+        ttk.Combobox(cache_controls, textvariable=self.ai_cache_mode, state="readonly", width=14,
+                     values=tuple(CACHE_MODES)).pack(side="left")
+        ttk.Button(cache_controls, text="清空判断缓存", command=self.clear_ai_memory).pack(side="right")
+        ttk.Label(parent, text="默认本工作周期内复用同一进程和页面标题的结论，应用 AI 设置后生效。\n"
+                  "新标题停留至少 3 秒才审核，自动请求至少间隔 30 秒；进程/关键词本地规则优先。",
+                  style="Muted.TLabel", wraplength=880).grid(row=21, column=0, sticky="w", pady=(3, 6))
+        self.review_status = tk.StringVar()
+        ttk.Label(parent, textvariable=self.review_status, style="Muted.TLabel", wraplength=880).grid(row=22, column=0, sticky="w")
+
+    def clear_ai_memory(self) -> None:
+        self.review_memory.clear()
+        if self.ai:
+            self.ai.clear_cache()
+        self.ai_generation += 1
+        self.ai_pending = False
+        self.ai_failures.clear()
+        self.ai_candidate = None
+        self.semantic_result = None
+        self.last_ai_details = None
+        self._log("程序", "ai_memory_cleared", "判断缓存已清空，后续窗口将重新审核")
+        self._refresh_status()
 
     def _identity(self) -> dict[str, str]:
         values = {key: widget.get("1.0", "end-1c") for key, widget in self.text_fields.items()}
@@ -420,6 +656,12 @@ class IronWillApp:
             self.semantic_result = None
             self.ai_generation += 1
             self.ai_pending = False
+            self._log("程序", "rules_applied", "本地规则已应用，重新建立采样基线",
+                      {"privacy_rules": len(new_policy.privacy_keywords),
+                       "blocked_process_rules": len(new_policy.blocked_processes),
+                       "blocked_title_rules": len(new_policy.blocked_titles),
+                       "allowed_process_rules": len(new_policy.allowed_processes),
+                       "allowed_title_rules": len(new_policy.allowed_titles)})
             self._refresh_status()
             if not quiet:
                 self.status_text.set("规则已应用。" + ("体验模式没有写入文件。" if self.demo else "后续窗口按新规则重新计时。"))
@@ -456,6 +698,7 @@ class IronWillApp:
         self.ai_generation += 1
         self.ai_pending = False
         self.last_tick = time.monotonic()
+        self.clear_ai_memory()
         self._handle(self.engine.start(identity["goal"], oath=identity["oath"],
                                        reality=identity["reality"], consequence=identity["consequence"]))
         self._save_state()
@@ -495,6 +738,7 @@ class IronWillApp:
         self.ai_generation += 1
         self.ai_pending = False
         self.semantic_result = None
+        self.clear_ai_memory()
         self._save_state()
         self.status_text.set("这个周期已结束。不会评价成果，也不会删除任何文件。")
         self._refresh_status()
@@ -516,19 +760,25 @@ class IronWillApp:
             return
         try:
             self._drain_results()
+            if self.closing:
+                return  # A tray exit can destroy Tk while this timer callback is running.
             now = time.monotonic()
             elapsed, self.last_tick = now - self.last_tick, now
             if not self.demo and self.engine.state.get("status") == "active":
                 observation = platform_windows.sample_foreground()
                 self.last_observation = observation
+                if classify(observation.process, observation.title, self.policy) == "GRAY":
+                    self._request_ai(observation)
+                else:
+                    self.ai_candidate = None
                 if self.semantic_result:
                     process, title, verdict, timestamp = self.semantic_result
                     if process == observation.process and title == observation.title and now - timestamp < 60:
                         observation = replace(observation, semantic=verdict)
+                baseline = self.engine._discard_next_tick
                 events = self.engine.tick(observation, elapsed)
+                self._record_observation(observation, elapsed, baseline=baseline)
                 self._handle(events)
-                if classify(observation.process, observation.title, self.policy) == "GRAY":
-                    self._request_ai(observation)
                 if now - self.last_saved >= 15:
                     self._save_state()
             self._poll_relay()
@@ -540,12 +790,21 @@ class IronWillApp:
                 self.engine.pause()
                 self._save_state()
             self.status_text.set("监督已暂停：本地采样或接口出现异常。请检查运行环境后手动继续。")
+            self._log("程序", "monitoring_error", "采样或接口异常，监督已暂停")
             self._refresh_status()
         self.timer_id = self.root.after(1000, self._poll)
 
     def _handle(self, events: list[dict[str, Any]] | None) -> None:
         for event in events or []:
             kind = event.get("type")
+            descriptions = {"reminder": "本地红线触发分档提醒", "gray_hint": "AI 语义判断触发轻提醒（不升档）",
+                            "recovered": "连续相关活动达到阈值，档位已清零", "lock_requested": "收到用户显式锁屏选择",
+                            "status": str(event.get("message", "周期状态已更新")), "error": "当前操作没有被执行"}
+            if kind in descriptions:
+                self._log("判断" if kind in {"reminder", "gray_hint", "recovered"} else "程序",
+                          str(kind), descriptions[kind],
+                          {"session_id": self.engine.state.get("id"), "stage": event.get("stage", 0),
+                           "status": self.engine.state.get("status"), "choice": event.get("choice", "")})
             if kind == "reminder":
                 stage = int(event.get("stage", self.engine.state.get("stage", 1)))
                 event_id = uuid.uuid4().hex
@@ -699,6 +958,69 @@ class IronWillApp:
         lock = "锁屏需明确点击" if self.policy.lock_enabled and not self.demo else "锁屏权限关闭"
         self.capability_text.set("%s  ·  %s  ·  %s  ·  自毁保险保留" % (windows, ai, lock))
         self._refresh_observation_status()
+        self._refresh_logs()
+        self.review_status.set(self.review_memory.warning or
+                               f"判断记忆 {len(self.review_memory.entries)} 条 · 本次实际 API 请求 {self.ai_api_count} 次 · 窗口缓存复用 {self.ai_cache_hits} 次")
+
+    def _record_observation(self, observation: Observation, elapsed: float, *, baseline=False) -> None:
+        state = self.engine.state
+        local = classify(observation.process, observation.title, self.policy)
+        idle = observation.idle_seconds
+        details = {"session_id": state.get("id"), "stage": state.get("stage", 0),
+                   "local_classification": local, "engine_classification": state.get("last_classification"),
+                   "drift_seconds": round(float(state.get("drift_seconds", 0)), 1),
+                   "quiet_remaining": round(float(state.get("quiet_remaining", 0)), 1)}
+        semantic = observation.semantic if observation.semantic in {"related", "unrelated", "unknown"} else "unknown"
+        if local == "PRIVATE":
+            summary = "隐私规则命中：标题和进程不记录，不请求 AI，不累计偏离"
+        elif observation.locked:
+            summary = "设备锁定：暂停计时与 AI 审核"
+        elif (observation.status != "ok" or idle is None or not isinstance(idle, (int, float))
+              or not math.isfinite(idle) or idle < 0):
+            summary = "采样不可用：没有有效判断，不累计偏离"
+            details["observation_status"] = observation.status
+        elif idle >= self.policy.idle_threshold_seconds:
+            summary = "达到输入空闲阈值：暂停计时与 AI 审核"
+        else:
+            details.update(process=observation.process[:260], title=observation.title[:1500],
+                           goal=str(state.get("goal", ""))[:4000], semantic=semantic)
+            if baseline:
+                summary = "建立本轮采样基线：本次不累计时间"
+            elif not math.isfinite(elapsed) or elapsed <= 0 or elapsed > self.policy.max_sample_gap_seconds:
+                summary = "采样时间断档：本次不补计偏离"
+            elif local == "ON_TASK":
+                summary = "本地规则判断为主线：不请求 AI，可参与连续回归计时"
+            elif local == "DRIFT":
+                summary = "本地规则判断为红线：按有效活动时间计时"
+            elif local == "UNKNOWN":
+                summary = "未识别到前台窗口：不累计偏离"
+            elif not self.ai:
+                summary = "本地规则未匹配，AI 未启用：没有审核结论"
+            elif semantic == "related":
+                summary = "AI 判断与主线相关：可参与连续回归计时"
+            elif semantic == "unrelated":
+                summary = "AI 判断可能偏离：仅语义提醒，不累计本地红线档位"
+            else:
+                summary = "本地规则未匹配：等待 AI 或尚无明确结论"
+            if local in {"DRIFT", "ON_TASK"}:
+                for field in ("blocked_processes", "allowed_processes", "blocked_titles", "allowed_titles"):
+                    text = observation.process if field.endswith("processes") else observation.title
+                    matches = [word for word in getattr(self.policy, field) if word in text.casefold()]
+                    if matches:
+                        details.setdefault("matched_rules", {})[field] = matches
+        signature = (state.get("id"), summary, details.get("process"), details.get("title"),
+                     semantic if local != "PRIVATE" else None, details["stage"],
+                     bool(details["quiet_remaining"]), bool(state.get("gray_hint_remaining", 0)),
+                     self.ai_generation, str(details.get("matched_rules", {})))
+        now = time.monotonic()
+        if signature != self._last_decision or now - self._last_decision_time >= 60:
+            self._log("判断", "observation", summary, details)
+            self._last_decision, self._last_decision_time = signature, now
+
+    def _audit_callback(self, generation, session_id, epoch, purpose):
+        def receive(event):
+            self.events.put(("ai_audit", generation, session_id, epoch, purpose, event))
+        return receive
 
     def _refresh_observation_status(self) -> None:
         state = self.engine.state
@@ -753,8 +1075,8 @@ class IronWillApp:
                 verdict = labels[details["verdict"]] if details["available"] else "AI 审核未完成，这不代表你在专注。"
                 verdict += "\n" + ("最近结果来自缓存。" if details["cached"] else "") + "原因：" + details["reason"]
             else:
-                verdict = "正在审核这个标题。" if self.ai_pending else "未匹配标题将交给 AI，等待下一次审核。"
-            verdict += f"\n本次运行已收到 {self.ai_completed_count} 次有效审核结果（含缓存）。"
+                verdict = "正在审核这个标题。" if self.ai_pending else (self.ai_wait_reason or "未匹配标题将交给 AI，等待下一次审核。")
+            verdict += f"\n本次实际 API 请求 {self.ai_api_count} 次；窗口缓存复用 {self.ai_cache_hits} 次。"
         if quiet > 0:
             verdict += f"\n你选择的暂缓还剩约 {math.ceil(quiet)} 秒有效活动时间。"
         if float(state.get("gray_hint_remaining", 0)) > 0 and local == "GRAY":
@@ -769,14 +1091,16 @@ class IronWillApp:
             return
         test_id = self.connection_test_id = uuid.uuid4().hex
         generation, client = self.ai_generation, self.ai
+        epoch = self._log_epoch
+        audit = self._audit_callback(generation, self.engine.state.get("id"), epoch, "虚拟连接测试")
         self.connection_test_button.configure(state="disabled")
         self.connection_test_text.set("正在用虚拟数据测试接口，不读取你的窗口……")
         def work() -> None:
             try:
-                result = client.check_connection()
+                result = client.check_connection(audit=audit)
             except Exception:
                 result = {"available": False, "reason": "模型连接测试未完成，请检查服务配置。"}
-            self.events.put(("ai_connection", test_id, generation, result))
+            self.events.put(("ai_connection", test_id, generation, result, epoch))
         threading.Thread(target=work, name="ironwill-ai-connection", daemon=True).start()
 
     def apply_ai(self) -> None:
@@ -793,6 +1117,7 @@ class IronWillApp:
         if not self.ai_enabled.get():
             self.ai = None
             self.ai_status.set("AI 已关闭，继续使用本地规则。")
+            self._log("程序", "ai_disabled", "AI 已关闭，继续使用本地规则")
             self._refresh_status()
             return
         endpoint, model, entered_key = self.ai_endpoint.get().strip(), self.ai_model.get().strip(), self.ai_key.get().strip()
@@ -832,7 +1157,8 @@ class IronWillApp:
         except Exception:
             self.ai_status.set("AI 设置无效，未连接服务。请检查地址、模型和运行依赖。")
             return
-        self.settings.update({"ai_endpoint": endpoint, "ai_model": model})
+        self.active_cache_mode = self.ai_cache_mode.get() if self.ai_cache_mode.get() in CACHE_MODES else "本工作周期"
+        self.settings.update({"ai_endpoint": endpoint, "ai_model": model, "ai_cache_mode": self.active_cache_mode})
         if not self._persist_settings():
             return
         try:
@@ -849,8 +1175,13 @@ class IronWillApp:
             self.ai_status.set("加密保存或删除 Key 未成功，AI 未启用。检查本机权限，或取消记住后重试。")
             return
         self.runtime_key = (identity, key) if key else None
+        self.journal.protect_secret(key)
         self.ai_key.set("")
         self.ai = client
+        self.ai_candidate = None
+        self.ai_wait_reason = ""
+        self._log("程序", "ai_configured", "AI 配置已应用；应用配置本身不发请求",
+                  {"endpoint": client.endpoint, "model": model})
         self.ai_status.set("AI 已配置；标题在周期开始后审核。" + ("Key 来源：" + key_source + "。" if key_source else "本机服务无需 Key。"))
         self._refresh_status()
 
@@ -908,32 +1239,79 @@ class IronWillApp:
             self.ai_pending = False
             self.semantic_result = None
             self.ai_status.set("AI 已立即关闭；已经发出的请求可能仍由服务处理，但结果不会再应用。")
+            self._log("程序", "ai_disabled", "AI 已关闭；已发出的请求无法撤回，旧结果不再应用")
             self._refresh_status()
 
     def _request_ai(self, observation: Observation) -> None:
         now = time.monotonic()
-        if not self.ai or self.ai_pending or now - self.ai_last_request < 10:
+        if not self.ai:
             return
         if (observation.status != "ok" or observation.locked or observation.idle_seconds is None
                 or not isinstance(observation.idle_seconds, (int, float))
                 or not math.isfinite(observation.idle_seconds) or observation.idle_seconds < 0
                 or observation.idle_seconds >= self.policy.idle_threshold_seconds
                 or classify(observation.process, observation.title, self.policy) != "GRAY"):
+            self.ai_candidate = None
             return
         # AIClient also enforces privacy policy. Do not include reality, consequence, oath, or signature.
         generation, client = self.ai_generation, self.ai
         session_id = self.engine.state.get("id")
         goal, process, title = str(self.engine.state.get("goal", "")), observation.process, observation.title
         policy = self.policy
+        candidate = (process, title)
+        if not self.ai_candidate or self.ai_candidate[:2] != candidate:
+            self.ai_candidate = (process, title, now)
+        identity = self._review_identity(process, title)
+        cached = self.review_memory.lookup(identity, session_id, CACHE_MODES[self.active_cache_mode])
+        if cached:
+            details = self.last_ai_details
+            same = (details and details["generation"] == generation and details["session_id"] == session_id
+                    and details["process"] == process and details["title"] == title)
+            self.semantic_result = (process, title, cached["verdict"], now)
+            if not same:
+                self.ai_cache_hits += 1
+                self._log("判断", "ai_memory", "复用已审核窗口：本次没有 API 请求",
+                          {"process": process[:260], "title": title[:1500], "session_id": session_id,
+                           "cache_mode": self.active_cache_mode, "result": cached})
+            self.last_ai_details = {"generation": generation, "session_id": session_id, "process": process,
+                                    "title": title, "verdict": cached["verdict"], "timestamp": now,
+                                    "reason": cached["reason"], "cached": True, "available": True}
+            self.ai_wait_reason = "已复用当前周期的判断，无需重新请求。"
+            return
+        self.semantic_result = None  # An expired/missing memory cannot keep refreshing an old verdict.
+        if now - self.ai_candidate[2] < 3:
+            self.ai_wait_reason = "等待窗口稳定停留至少 3 秒后审核，快速切换不会发请求。"
+            return
+        if self.ai_pending:
+            self.ai_wait_reason = "已有审核请求正在进行，等待返回。"
+            return
+        if now - self.ai_last_request < 30:
+            self.ai_wait_reason = "自动请求至少间隔 30 秒，当前等待下一次审核。"
+            return
+        failure = self.ai_failures.get(identity)
+        if failure and now < failure[1]:
+            self.ai_wait_reason = "上次审核失败，正在退避等待后再试；没有将失败当成偏离。"
+            return
+        epoch = self._log_epoch
+        audit = self._audit_callback(generation, session_id, epoch, "窗口标题审核")
         self.ai_pending, self.ai_last_request = True, now
         self.ai_status.set("正在审核未匹配标题，无需填写红线关键词……")
         def work() -> None:
             try:
-                result = client.advise(goal, process, title, policy=policy)
+                result = client.advise(goal, process, title, policy=policy, audit=audit)
             except Exception:
                 result = {"verdict": "unknown", "reason": "服务暂不可用"}
-            self.events.put(("ai", generation, session_id, process, title, result))
+            self.events.put(("ai", generation, session_id, process, title, result, epoch))
         threading.Thread(target=work, name="ironwill-ai", daemon=True).start()
+
+    def _review_identity(self, process, title):
+        from .ai import AIClient
+        endpoint = getattr(self.ai, "endpoint", None)
+        model = getattr(self.ai, "model", None)
+        return review_identity(str(self.engine.state.get("goal", "")), process, title, self.policy,
+                               endpoint if isinstance(endpoint, str) else self.settings.get("ai_endpoint", ""),
+                               model if isinstance(model, str) else self.settings.get("ai_model", ""),
+                               AIClient.REVISION, self.engine.state.get("id", ""))
 
     def _drain_results(self) -> None:
         while True:
@@ -941,8 +1319,29 @@ class IronWillApp:
                 item = self.events.get_nowait()
             except queue.Empty:
                 return
-            if item[0] == "ai":
-                _, generation, session_id, process, title, result = item
+            if item[0] == "ai_audit":
+                _, generation, session_id, epoch, purpose, audit_event = item
+                if audit_event["event"] == "ai_request":
+                    self.ai_api_count += 1
+                if epoch == self._log_epoch:
+                    details = {**audit_event.get("details", {}), "purpose": purpose,
+                               "session_id": session_id, "generation": generation,
+                               "context_current": generation == self.ai_generation and session_id == self.engine.state.get("id")}
+                    self._log("AI通信", audit_event["event"], audit_event["summary"], details)
+            elif item[0] == "ai":
+                _, generation, session_id, process, title, result = item[:6]
+                current = (generation == self.ai_generation and session_id == self.engine.state.get("id")
+                           and self.engine.state.get("status") == "active" and bool(self.ai))
+                if len(item) == 6 or item[6] == self._log_epoch:
+                    details = {"session_id": session_id, "generation": generation, "accepted": current,
+                               "result": result}
+                    if classify(process, title, self.policy) != "PRIVATE":
+                        details.update(process=process[:260], title=title[:1500])
+                    else:
+                        details["result"] = "[当前隐私规则已屏蔽窗口与判断正文]"
+                    self._log("判断", "ai_verdict", ("AI 审核结果已接收，仅供匹配窗口使用" if result.get("available") else
+                              "AI 审核失败：未取得有效判断，不计为偏离") if current else
+                              "AI 结果已过期：周期、规则或设置已变化，未采用", details)
                 if generation != self.ai_generation:
                     continue
                 self.ai_pending = False
@@ -954,6 +1353,15 @@ class IronWillApp:
                 self.semantic_result = (process, title, verdict, time.monotonic())
                 available = bool(result.get("available", False))
                 reason = str(result.get("reason", "未提供原因。"))[:500]
+                identity = self._review_identity(process, title)
+                if available:
+                    self.review_memory.remember(identity, session_id, {**result, "verdict": verdict, "reason": reason})
+                    self.ai_failures.pop(identity, None)
+                else:
+                    failures = self.ai_failures.get(identity, (0, 0))[0] + 1
+                    self.ai_failures[identity] = (failures, time.monotonic() + min(300, 30 * 2 ** min(failures - 1, 4)))
+                    if len(self.ai_failures) > 512:
+                        self.ai_failures.pop(next(iter(self.ai_failures)))
                 self.ai_completed_count += int(available)
                 self.last_ai_details = {"generation": generation, "session_id": session_id,
                                         "process": process, "title": title, "verdict": verdict,
@@ -963,7 +1371,7 @@ class IronWillApp:
                           "unknown": "最近标题审核：信息不足，未作结论。"}[verdict] if available else "最近标题审核未完成。")
                 self.ai_status.set(label + "原因：" + reason)
             elif item[0] == "ai_connection":
-                _, test_id, generation, result = item
+                _, test_id, generation, result = item[:4]
                 if test_id != self.connection_test_id:
                     continue
                 self.connection_test_id = None
@@ -973,6 +1381,10 @@ class IronWillApp:
                     continue
                 self.connection_test_text.set("连接成功：接口返回了符合约定的 JSON。测试未改变执行状态。" if result.get("available") else
                                               "连接测试未通过：" + str(result.get("reason", "请检查服务配置。"))[:500])
+            elif item[0] == "tray":
+                self._tray_event(item[1])
+                if self.closing:
+                    return
             elif item[0] == "relay_started":
                 self.relay_starting = False
                 self.relay = item[1]
@@ -1112,8 +1524,10 @@ class IronWillApp:
         if self.timer_id:
             self.root.after_cancel(self.timer_id)
         if self.engine.state.get("status") in {"active", "paused"}:
-            self.engine.end()
+            self._handle(self.engine.end())
             self._save_state()
+        if self.tray:
+            self.tray.stop()
         self.ai_generation += 1
         self.ai_key.set("")
         self.runtime_key = None
@@ -1167,7 +1581,10 @@ def smoke_test() -> dict[str, Any]:
             after = app.engine.snapshot()
             assert before == after, "Preview changed the execution state"
             assert not list(Path(directory).iterdir()), "Demo wrote personal files"
-            return {"ok": True, "pages": 3, "identity_fields": len(app.text_fields),
+            app._log("程序", "self_check", "安全体验日志（仅内存）")
+            app._refresh_logs()
+            assert len(app.log_tree.get_children()) == 1, "Log page failed to render"
+            return {"ok": True, "pages": 4, "log_page": True, "identity_fields": len(app.text_fields),
                     "rule_lists": len(app.rule_fields), "preview_unchanged": before == after,
                     "monitoring": False, "network": False, "lock": False}
         finally:

@@ -1,3 +1,5 @@
+# Copyright (C) 2026 IronWill contributors
+# SPDX-License-Identifier: GPL-3.0-only
 """Pure engine regression tests: no model calls or operating-system actions."""
 import json
 from pathlib import Path

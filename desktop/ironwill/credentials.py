@@ -1,3 +1,5 @@
+# Copyright (C) 2026 IronWill contributors
+# SPDX-License-Identifier: GPL-3.0-only
 """Opt-in, current-user Windows DPAPI storage. No secret is read at import."""
 from __future__ import annotations
 

@@ -1,3 +1,5 @@
+# Copyright (C) 2026 IronWill contributors
+# SPDX-License-Identifier: GPL-3.0-only
 """Side-effect-free execution policy, with explicit JSON persistence helpers.
 
 The engine never reads windows, invokes a model, locks a device, or deletes files.

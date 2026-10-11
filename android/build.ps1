@@ -28,7 +28,7 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 $manifest.manifest.SetAttribute('package', 'com.ironwill.app')
 $manifestPath = Join-Path $out 'AndroidManifest.xml'
 $manifest.Save($manifestPath)
-& (Join-Path $toolsDir 'aapt.exe') package -f -m -J $gen -M $manifestPath -S (Join-Path $projectRoot 'app\src\main\res') -I $androidJar -F (Join-Path $out 'resources.ap_') --min-sdk-version 28 --target-sdk-version 35 --version-code 1 --version-name '0.1.0'
+& (Join-Path $toolsDir 'aapt.exe') package -f -m -J $gen -M $manifestPath -S (Join-Path $projectRoot 'app\src\main\res') -A (Join-Path $projectRoot 'app\src\main\assets') -I $androidJar -F (Join-Path $out 'resources.ap_') --min-sdk-version 28 --target-sdk-version 35 --version-code 2 --version-name '0.1.1'
 if ($LASTEXITCODE -ne 0) { throw 'Android resource packaging failed.' }
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'app\src\main\java') -Filter '*.java' -Recurse) + @(Get-ChildItem -LiteralPath $gen -Filter '*.java' -Recurse)
 $sourceArgs = $sources | ForEach-Object { '"' + $_.FullName.Replace('\','/') + '"' }
@@ -50,7 +50,7 @@ if (-not (Test-Path -LiteralPath $key)) {
     & (Join-Path $javaBin 'keytool.exe') -genkeypair -keystore $key -storepass android -keypass android -alias ironwill-dev -keyalg RSA -keysize 2048 -validity 10000 -dname 'CN=IronWill Development,O=Personal Development,C=US'
     if ($LASTEXITCODE -ne 0) { throw 'Development signing key creation failed.' }
 }
-$apk = Join-Path $out 'IronWill-Android-0.1.apk'
+$apk = Join-Path $out 'IronWill-Android-0.1.1.apk'
 & (Join-Path $toolsDir 'apksigner.bat') sign --ks $key --ks-key-alias ironwill-dev --ks-pass pass:android --key-pass pass:android --out $apk (Join-Path $out 'aligned.apk')
 if ($LASTEXITCODE -ne 0) { throw 'APK signing failed.' }
 & (Join-Path $toolsDir 'apksigner.bat') verify --verbose $apk

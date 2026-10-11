@@ -1,3 +1,5 @@
+# Copyright (C) 2026 IronWill contributors
+# SPDX-License-Identifier: GPL-3.0-only
 """Use synthetic keys only; real DPAPI tests write to temporary directories."""
 import os
 from pathlib import Path

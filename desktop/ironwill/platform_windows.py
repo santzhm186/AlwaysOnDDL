@@ -1,3 +1,5 @@
+# Copyright (C) 2026 IronWill contributors
+# SPDX-License-Identifier: GPL-3.0-only
 """Windows-only observation and explicit locking, with no third-party packages.
 
 Importing this module never locks the workstation. Unsupported platforms return
