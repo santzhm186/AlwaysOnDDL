@@ -143,6 +143,6 @@ python -m venv .venv
 
 Android 可用 Android SDK 与 JDK 直接构建，无需下载 Gradle 依赖。命令、签名说明与 SDK 要求见 [android/README.md](android/README.md)。源码包不包含开发签名私钥；本机现有私钥在 `android/build/ironwill-development.jks`，希望以后覆盖升级当前 APK 时应妥善保留。
 
-Windows 0.1.6完整149项测试和EXE隐藏自检通过，包含日志、缓存、托盘、凭据、许可资源和局域网连接上限；Android 0.1.2重新构建、GPL资源、开发签名及26项JVM断言通过。详细范围见[验证记录](docs/verification.md)。Android真机安装、厂商后台限制、实际通知及锁屏仍待验收。
+Windows 0.1.6完整152项测试和EXE隐藏自检通过，包含日志、缓存、托盘、凭据、许可资源和局域网连接上限；Android 0.1.2重新构建、GPL资源、开发签名及26项JVM断言通过。详细范围见[验证记录](docs/verification.md)。Android真机安装、厂商后台限制、实际通知及锁屏仍待验收。
 
 升级cryptography wheel时，在已安装该wheel的构建环境中，从仓库根目录执行`python tools/collect_dependency_licenses.py`重新收集SBOM对应crate许可；它只下载公开归档并核验哈希，不执行第三方源码或安装新运行库。公开发布前运行`python tools/audit_publication.py --history`并核对[开源审查](docs/open_source_review.md)。

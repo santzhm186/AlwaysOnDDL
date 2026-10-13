@@ -412,12 +412,26 @@ class DesktopBoundaryTests(unittest.TestCase):
         self.app.remember_api_key.set(True)
         self.app.apply_ai()
         previous_generation = self.app.ai_generation
-        self.app.forget_saved_key()
+        with patch("ironwill.app.messagebox.askyesno", return_value=True):
+            self.app.forget_saved_key()
         self.assertFalse(self.app.key_store.exists())
         self.assertIsNone(self.app.ai)
         self.assertIsNone(self.app.runtime_key)
         self.assertFalse(self.app.ai_enabled.get())
         self.assertGreater(self.app.ai_generation, previous_generation)
+
+    def test_cancelling_forget_keeps_saved_and_runtime_key(self):
+        self.configure_key()
+        self.app.remember_api_key.set(True)
+        self.app.apply_ai()
+        client, generation = self.app.ai, self.app.ai_generation
+        with patch("ironwill.app.messagebox.askyesno", return_value=False):
+            self.app.forget_saved_key()
+        self.assertTrue(self.app.key_store.exists())
+        self.assertIs(self.app.ai, client)
+        self.assertTrue(self.app.ai_enabled.get())
+        self.assertIsNotNone(self.app.runtime_key)
+        self.assertEqual(self.app.ai_generation, generation)
 
     def test_unchecking_remember_removes_disk_copy_but_keeps_current_session(self):
         self.configure_key()
@@ -614,6 +628,29 @@ class DesktopBoundaryTests(unittest.TestCase):
             self.app._request_ai(observation)
             worker.assert_not_called()
         self.assertEqual(self.app.semantic_result[2], "related")
+
+    def test_cache_clear_requires_confirmation_but_can_be_cancelled(self):
+        self.begin()
+        self.app.ai = Mock()
+        identity = self.app._review_identity("browser", "reviewed page")
+        self.app.review_memory.remember(identity, self.app.engine.state["id"], self.result("neutral"))
+        generation = self.app.ai_generation
+        with patch("ironwill.app.messagebox.askyesno", return_value=False):
+            self.app.clear_ai_memory()
+        self.assertIn(identity, self.app.review_memory.entries)
+        self.assertEqual(self.app.ai_generation, generation)
+        self.app.ai.clear_cache.assert_not_called()
+        with patch("ironwill.app.messagebox.askyesno", return_value=True):
+            self.app.clear_ai_memory()
+        self.assertEqual(len(self.app.review_memory.entries), 0)
+        self.app.ai.clear_cache.assert_called_once()
+        self.assertGreater(self.app.ai_generation, generation)
+
+    def test_cycle_start_and_end_clear_cache_without_extra_confirmation(self):
+        with patch("ironwill.app.messagebox.askyesno", side_effect=AssertionError("unexpected confirmation")):
+            self.begin()
+            self.app.end()
+        self.assertEqual(self.app.engine.state["status"], "ended")
 
     def test_new_window_needs_stable_dwell_and_network_interval(self):
         import time
