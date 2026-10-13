@@ -8,7 +8,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_VERSION = "0.1.4"
+SOURCE_VERSION = "0.1.6"
 SKIP_PARTS = {"build", "dist", "__pycache__", ".git", ".gradle", ".idea", ".venv", ".venv-build", "secrets", "pairing", "logs"}
 SUFFIXES = {".py", ".java", ".md", ".txt", ".ps1", ".xml", ".gradle", ".properties"}
 
@@ -38,7 +38,7 @@ def main():
         assert checked.testzip() is None
         assert all(not name.endswith((".dpapi", ".key", ".crt", ".jks", ".keystore", ".jsonl", "token.txt", "deepseek_key.txt")) for name in checked.namelist())
     versioned_name = f"IronWill-Windows-{SOURCE_VERSION}.exe"
-    names = [versioned_name, "IronWill-Android-0.1.1.apk", archive.name]
+    names = [versioned_name, "IronWill-Android-0.1.2.apk", archive.name]
     fixed = target / "IronWill.exe"
     if fixed.is_file() and fixed.read_bytes() == (target / versioned_name).read_bytes():
         names.insert(0, "IronWill.exe")

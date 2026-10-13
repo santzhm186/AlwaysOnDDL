@@ -41,6 +41,20 @@ class CoreTests(unittest.TestCase):
         policy = Policy(blocked_titles=["video"], allowed_titles=["tutorial"])
         self.assertEqual(classify("browser", "video tutorial", policy), "GRAY")
 
+    def test_neutral_semantic_neither_reminds_nor_proves_recovery(self):
+        self.advance(40)
+        self.assertEqual(self.engine.state["stage"], 1)
+        drift = self.engine.state["drift_seconds"]
+        neutral = Observation(process="browser", title="team notification", semantic="neutral")
+        self.assertEqual(self.advance(120, neutral), [])
+        self.assertEqual(self.engine.state["stage"], 1)
+        self.assertEqual(self.engine.state["drift_seconds"], drift)
+        self.assertEqual(self.engine.state["recovery_seconds"], 0)
+        related = Observation(process="browser", title="task documentation", semantic="related")
+        events = self.advance(60, related)
+        self.assertTrue(any(event["type"] == "recovered" for event in events))
+        self.assertEqual(self.engine.state["stage"], 0)
+
     def test_empty_keyword_cannot_match_everything(self):
         policy = Policy(blocked_processes=["", "  "])
         self.assertEqual(classify("editor", "file", policy), "GRAY")

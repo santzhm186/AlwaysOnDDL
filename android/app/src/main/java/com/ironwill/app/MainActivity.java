@@ -9,6 +9,10 @@ import android.content.*;
 import android.content.pm.*;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
+import android.graphics.drawable.StateListDrawable;
+import android.content.res.ColorStateList;
 import android.os.*;
 import android.provider.Settings;
 import android.text.InputType;
@@ -18,78 +22,126 @@ import org.json.JSONObject;
 import java.util.*;
 
 public final class MainActivity extends Activity {
-    private static final int BG = Color.rgb(19, 23, 22), FG = Color.rgb(236, 240, 231), MUTED = Color.rgb(164, 175, 163), ACCENT = Color.rgb(215, 240, 108);
+    private static final int BG = Color.rgb(19, 23, 22), FG = Color.rgb(237, 240, 231), MUTED = Color.rgb(168, 180, 170), ACCENT = Color.rgb(215, 240, 108);
+    private static final int PANEL = Color.rgb(28, 35, 32), FIELD = Color.rgb(20, 26, 23), LINE = Color.rgb(53, 65, 57);
     private Store store;
-    private LinearLayout content;
+    private LinearLayout content, page;
     private EditText vow, task, reality, consequence;
-    private TextView state, blockedSummary;
+    private TextView state, stateTitle, blockedSummary;
+    private Button startButton;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable refresh = new Runnable() { public void run() { updateState(); handler.postDelayed(this, 2000); } };
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved); store = new Store(this); MonitorService.channels(this);
         ScrollView scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.setBackgroundColor(BG);
-        content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL); content.setPadding(dp(24), dp(24), dp(24), dp(32)); scroll.addView(content);
+        scroll.setClipToPadding(false);
+        content = new LinearLayout(this); content.setOrientation(LinearLayout.VERTICAL); content.setPadding(dp(20), dp(24), dp(20), dp(32)); scroll.addView(content);
+        page = content;
         setContentView(scroll);
         scroll.setOnApplyWindowInsetsListener((v, insets) -> {
             int top, bottom;
             if (Build.VERSION.SDK_INT >= 30) { android.graphics.Insets bars = insets.getInsets(WindowInsets.Type.systemBars()); top = bars.top; bottom = bars.bottom; }
             else { top = insets.getSystemWindowInsetTop(); bottom = insets.getSystemWindowInsetBottom(); }
-            content.setPadding(dp(24), top + dp(24), dp(24), bottom + dp(32)); return insets;
+            page.setPadding(dp(20), top + dp(24), dp(20), bottom + dp(32)); return insets;
         });
-        label("IRONWILL", 14, ACCENT, true);
-        label("别让决定被搁置。", 30, FG, true);
-        label("你决定怎样度过这一段时间。\n它记住，在你偏离时出现。", 15, MUTED, false);
-        state = label("", 14, ACCENT, false);
-        section("你的原话");
-        vow = input("把你愿意遵守的承诺写在这里", store.text("vow"), 3);
-        section("你正在面对什么（只留在手机）");
-        reality = input("你的现实处境，按你自己的原话写（可选）", store.text("reality"), 2);
-        consequence = input("继续拖延会有什么后果，按你的原话写（可选）", store.text("consequence"), 2);
-        section("现在的主线");
+        TextView brand = label("IRONWILL", 13, ACCENT, true); brand.setLetterSpacing(0.12f);
+        label("把决定，\n变成行动。", 32, FG, true).setAccessibilityHeading(true);
+        label("只专注于这一轮。\n决定由你作出，提醒按约执行。", 15, MUTED, false);
+        card("当前周期", null);
+        stateTitle = label("尚未开始", 21, ACCENT, true);
+        state = label("", 13, MUTED, false);
+        content = page;
+
+        card("01  /  当前主线", "写下这一轮已经决定要做的事。");
         task = input("这一轮你选择做什么？", store.text("task"), 2);
-        section("这轮需要打断的应用");
-        blockedSummary = label("", 14, MUTED, false); updateBlocked();
-        button("选择红线应用", this::selectApps, false);
-        label("连续停留约 60 秒后提醒。只根据你选择的应用，不阅读正文，也不评判成果。", 13, MUTED, false);
-        button("开始 / 继续这一轮", this::startCycle, true);
+        section("你的承诺");
+        vow = input("把你愿意遵守的承诺写在这里", store.text("vow"), 2);
+        startButton = button("开始这一轮  →", this::startCycle, true);
         LinearLayout row = new LinearLayout(this); row.setOrientation(LinearLayout.HORIZONTAL); content.addView(row);
         smallButton(row, "暂停", () -> { save(); store.pause(); stopService(new Intent(this, MonitorService.class)); updateState(); });
         smallButton(row, "结束本轮", () -> new AlertDialog.Builder(this).setTitle("结束本轮？")
                 .setMessage("记录由你结束本轮。不会按午夜清零，也不会评判你的成果。")
                 .setNegativeButton("继续", null).setPositiveButton("结束", (d, w) -> { save(); store.end(); stopService(new Intent(this, MonitorService.class)); updateState(); }).show());
-        section("提醒出现时，重新选择");
+        content = page;
+
+        card("02  /  本轮边界", "只根据你选择的应用，不阅读正文，也不评判成果。");
+        blockedSummary = label("", 14, MUTED, false); updateBlocked();
+        button("选择红线应用", this::selectApps, false);
+        label("连续停留约 60 秒后提醒。", 12, MUTED, false);
+        content = page;
+
+        card("03  /  你自己的原话", "现实与后果只留在手机，按你自己的判断填写。");
+        section("现在的现实");
+        reality = input("你正在面对什么？（可选）", store.text("reality"), 2);
+        section("拖延的后果");
+        consequence = input("继续拖延会有什么后果？（可选）", store.text("consequence"), 2);
+        content = page;
+
+        card("提醒出现时，重新选择", null);
         label("返回主线：两分钟后再检查。\n这件事值得 / 喘口气：十五分钟后再检查。\n无回应不会自动锁屏，也不会被记成违约。", 14, MUTED, false);
         button("处理当前提醒", this::answerDialog, false);
-        section("能力与设备");
-        button("通知权限与提醒测试", this::notificationOptions, false);
-        button("活动感知权限", this::observationOptions, false);
-        button("电脑配对与任务导入（可选）", this::computerOptions, false);
-        button("本地记录", () -> showText("本地记录", store.history()), false);
-        button("关于与许可", this::showLicense, false);
-        button("手动锁屏能力测试（一次）", this::testLock, false);
-        label("个人测试版 · 0.1.1\n无固定作息 · 默认不锁屏 · 不采集正文\n自动强约束与终局尚未启用。系统可停止后台服务；应用会如实显示可用能力。", 12, MUTED, false);
+        content = page;
+
+        card("能力与设备", "按需授权，随时可以在系统设置关闭。");
+        button("通知权限与提醒测试  ›", this::notificationOptions, false);
+        button("活动感知权限  ›", this::observationOptions, false);
+        button("电脑配对与任务导入（可选）  ›", this::computerOptions, false);
+        button("本地记录  ›", () -> showText("本地记录", store.history()), false);
+        button("关于与许可  ›", this::showLicense, false);
+        button("手动锁屏能力测试（一次）  ›", this::testLock, false);
+        content = page;
+        label("IRONWILL · 0.1.2\n无固定作息 · 默认不锁屏 · 不采集正文\n自动强约束与终局尚未启用。系统可停止后台服务；应用会如实显示可用能力。", 12, MUTED, false);
+        updateState();
     }
     private int dp(int n) { return Math.round(n * getResources().getDisplayMetrics().density); }
+    private GradientDrawable surface(int color, int stroke, int radius) {
+        GradientDrawable shape = new GradientDrawable(); shape.setColor(color); shape.setCornerRadius(dp(radius));
+        if (stroke != 0) shape.setStroke(dp(1), stroke); return shape;
+    }
+    private void card(String title, String subtitle) {
+        LinearLayout box = new LinearLayout(this); box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(18), dp(20), dp(18), dp(12)); box.setBackground(surface(PANEL, LINE, 18));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.bottomMargin = dp(16); page.addView(box, lp);
+        content = box;
+        label(title, 17, FG, true).setAccessibilityHeading(true);
+        if (subtitle != null) label(subtitle, 13, MUTED, false);
+    }
     private TextView label(String value, int size, int color, boolean bold) {
-        TextView t = new TextView(this); t.setText(value); t.setTextColor(color); t.setTextSize(size); t.setLineSpacing(dp(3), 1f);
+        TextView t = new TextView(this); t.setText(value); t.setTextColor(color); t.setTextSize(size); t.setLineSpacing(dp(4), 1f);
         if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.bottomMargin = dp(14); t.setLayoutParams(lp); content.addView(t); return t;
     }
-    private void section(String title) { TextView t = label(title, 16, FG, true); ((LinearLayout.LayoutParams)t.getLayoutParams()).topMargin = dp(18); }
+    private void section(String title) { TextView t = label(title, 14, FG, true); t.setAccessibilityHeading(true); ((LinearLayout.LayoutParams)t.getLayoutParams()).topMargin = dp(4); }
     private EditText input(String hint, String value, int lines) {
         EditText e = new EditText(this); e.setHint(hint); e.setHintTextColor(MUTED); e.setTextColor(FG); e.setTextSize(16); e.setText(value);
         e.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES); e.setMinLines(lines); e.setMaxLines(lines + 2); e.setGravity(Gravity.TOP);
         e.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(2000)});
+        e.setPadding(dp(14), dp(12), dp(14), dp(12));
+        StateListDrawable background = new StateListDrawable();
+        background.addState(new int[]{android.R.attr.state_focused}, surface(FIELD, ACCENT, 10));
+        background.addState(new int[]{}, surface(FIELD, LINE, 10)); e.setBackground(background);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.bottomMargin = dp(14); content.addView(e, lp); return e;
     }
-    private void button(String text, Runnable action, boolean primary) {
-        Button b = new Button(this); b.setText(text); b.setAllCaps(false); b.setTextSize(15); b.setPadding(dp(8), dp(6), dp(8), dp(6));
-        b.setTextColor(primary ? BG : FG); b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(primary ? ACCENT : Color.rgb(42, 50, 46)));
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.bottomMargin = dp(6); content.addView(b, lp); b.setOnClickListener(v -> action.run());
+    private Button styledButton(String text, boolean primary) {
+        Button b = new Button(this); b.setText(text); b.setAllCaps(false); b.setTextSize(14);
+        b.setPadding(dp(14), dp(12), dp(14), dp(12)); b.setMinHeight(dp(52)); b.setMinimumHeight(dp(52));
+        b.setTextColor(primary ? BG : FG); b.setTypeface(Typeface.DEFAULT, primary ? Typeface.BOLD : Typeface.NORMAL);
+        StateListDrawable faces = new StateListDrawable();
+        int fill = primary ? ACCENT : Color.rgb(41, 51, 45);
+        faces.addState(new int[]{android.R.attr.state_focused}, surface(fill, primary ? FG : ACCENT, 10));
+        faces.addState(new int[]{}, surface(fill, 0, 10));
+        b.setBackground(new RippleDrawable(ColorStateList.valueOf(primary ? 0x22000000 : 0x22ffffff), faces, surface(Color.WHITE, 0, 10)));
+        b.setElevation(0); b.setStateListAnimator(null); return b;
+    }
+    private Button button(String text, Runnable action, boolean primary) {
+        Button b = styledButton(text, primary);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.bottomMargin = dp(10); content.addView(b, lp); b.setOnClickListener(v -> action.run()); return b;
     }
     private void smallButton(LinearLayout parent, String text, Runnable action) {
-        Button b = new Button(this); b.setText(text); b.setTextColor(FG); b.setAllCaps(false);
-        b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(Color.rgb(42, 50, 46))); parent.addView(b, new LinearLayout.LayoutParams(0, -2, 1)); b.setOnClickListener(v -> action.run());
+        Button b = styledButton(text, false);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1); lp.bottomMargin = dp(10);
+        if (parent.getChildCount() > 0) lp.leftMargin = dp(10);
+        parent.addView(b, lp); b.setOnClickListener(v -> action.run());
     }
     private void save() {
         if (vow == null || task == null) return;
@@ -110,7 +162,9 @@ public final class MainActivity extends Activity {
         String extra = quiet > 0 ? "\n暂缓提醒，还剩 " + ((quiet + 59999) / 60000) + " 分钟" : "";
         String sensing = PackageObserverService.connected != null ? "无障碍已连接（仅包名）" : hasUsageAccess(this) ? "使用情况访问已授权" : "活动感知未授权";
         String notifications = MonitorService.notificationsAvailable(this) ? "通知可用" : "通知未开启";
-        state.setText(title + extra + "\n" + sensing + " · " + notifications + "\n" + MonitorService.syncStatus + (MonitorService.running ? "\n当前观察：" + MonitorService.observed : ""));
+        stateTitle.setText(title); stateTitle.setTextColor("active".equals(p) && MonitorService.running ? ACCENT : FG);
+        state.setText(sensing + " · " + notifications + extra + "\n" + MonitorService.syncStatus + (MonitorService.running ? "\n当前观察：" + MonitorService.observed : ""));
+        startButton.setText("paused".equals(p) || "active".equals(p) ? "继续这一轮  →" : "开始这一轮  →");
     }
     private void startCycle() {
         save();
@@ -277,7 +331,7 @@ public final class MainActivity extends Activity {
         }
     }
     private void showText(String title, String text) {
-        ScrollView s = new ScrollView(this); TextView t = new TextView(this); t.setText(text); t.setTextIsSelectable(true); t.setPadding(dp(22), dp(12), dp(22), dp(12)); s.addView(t);
+        ScrollView s = new ScrollView(this); TextView t = new TextView(this); t.setText(text); t.setTextColor(FG); t.setTextSize(14); t.setLineSpacing(dp(4), 1f); t.setTextIsSelectable(true); t.setPadding(dp(22), dp(12), dp(22), dp(12)); s.addView(t);
         new AlertDialog.Builder(this).setTitle(title).setView(s).setPositiveButton("关闭", null).show();
     }
     private void toast(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }

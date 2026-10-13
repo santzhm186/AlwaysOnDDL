@@ -45,7 +45,7 @@ class ReviewMemory:
                             or not isinstance(value, dict) or set(value) != {"scope", "created_at", "verdict", "reason"}
                             or not isinstance(value["scope"], str) or len(value["scope"]) > 64
                             or type(value["created_at"]) not in (float, int) or not math.isfinite(value["created_at"])
-                            or value["verdict"] not in {"related", "unrelated", "unknown"}
+                            or value["verdict"] not in {"related", "neutral", "unrelated", "unknown"}
                             or not isinstance(value["reason"], str) or len(value["reason"]) > 500):
                         raise ValueError("invalid cache entry")
                     self.entries[key] = redact(value)
@@ -66,7 +66,7 @@ class ReviewMemory:
                 "cached": True, "error_code": ""}
 
     def remember(self, identity, scope, result):
-        if (not result.get("available") or result.get("verdict") not in {"related", "unrelated", "unknown"}
+        if (not result.get("available") or result.get("verdict") not in {"related", "neutral", "unrelated", "unknown"}
                 or not isinstance(result.get("reason"), str)):
             return
         self.entries[identity] = {"scope": scope, "created_at": time.time(),

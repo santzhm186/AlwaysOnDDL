@@ -32,6 +32,16 @@ class ReviewMemoryTests(unittest.TestCase):
         self.assertIsNone(reopened.lookup(key, "cycle-b"))
         self.assertNotIn("browser.exe", self.memory.path.read_text(encoding="utf-8"))
 
+    def test_neutral_classification_survives_reopen_and_uses_chosen_expiry(self):
+        key = self.identity(revision="ironwill-relevance-v2-digit")
+        with patch("ironwill.review_memory.time.time", return_value=1000):
+            self.memory.remember(key, "cycle-a", {**self.result, "verdict": "neutral", "reason": "2 · 辅助/中立"})
+        reopened = ReviewMemory(self.directory)
+        with patch("ironwill.review_memory.time.time", return_value=2000):
+            self.assertEqual(reopened.lookup(key, "cycle-a")["verdict"], "neutral")
+            self.assertIsNone(reopened.lookup(key, "cycle-a", 900))
+            self.assertIsNone(reopened.lookup(self.identity(revision="ironwill-relevance-v1"), "cycle-a"))
+
     def test_timed_cache_expires_and_clock_rewind_is_rejected(self):
         key = self.identity()
         with patch("ironwill.review_memory.time.time", return_value=1000):

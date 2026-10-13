@@ -13,6 +13,7 @@ import struct
 import sys
 import tempfile
 import tkinter as tk
+import time
 import zlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "desktop"))
@@ -77,20 +78,37 @@ def main():
     destination = Path(__file__).resolve().parents[1] / "dist" / "previews"
     destination.mkdir(parents=True, exist_ok=True)
     root = tk.Tk()
+    def settle():
+        root.update()
+        time.sleep(0.08)  # Let Windows paint the synthetic window before PrintWindow.
+        root.update()
     with tempfile.TemporaryDirectory(prefix="ironwill-preview-") as directory:
         try:
             app = IronWillApp(root, Path(directory), demo=True)
             app._log("判断", "observation", "本地规则判断为主线：不请求 AI", {"process": "editor.exe", "title": "示例项目", "local_classification": "ON_TASK"})
-            app._log("AI通信", "ai_request", "发起 AI 标题审核请求", {"request_id": "synthetic-preview", "endpoint": "https://example.invalid/v1/chat/completions", "request_body": {"model": "示例模型", "messages": [{"role": "user", "content": "只用于展示的虚拟目标与标题"}]}})
-            app._log("AI通信", "ai_response", "AI 返回有效判断", {"request_id": "synthetic-preview", "http_status": 200, "duration_ms": 245, "result": {"verdict": "related", "reason": "示例资料与目标相关"}, "response_body": json.dumps({"choices": [{"message": {"content": '{"verdict":"related","reason":"示例资料与目标相关"}'}}]}, ensure_ascii=False)})
-            app.notebook.select(3)
+            app._log("AI通信", "ai_request", "发起 AI 标题审核请求", {"request_id": "synthetic-preview", "endpoint": "https://example.invalid/v1/chat/completions", "request_body": {"model": "示例模型", "max_tokens": 1, "temperature": 0, "messages": [{"role": "user", "content": "只用于展示的虚拟目标与标题"}]}})
+            app._log("AI通信", "ai_response", "AI 返回有效判断", {"request_id": "synthetic-preview", "http_status": 200, "duration_ms": 245, "result": {"verdict": "neutral", "code": "2", "reason": "2 · 辅助/中立", "reason_source": "local_code_mapping"}, "response_body": json.dumps({"choices": [{"message": {"content": "2"}}]}, ensure_ascii=False)})
             app._refresh_logs()
             for size in ("1030x820", "820x650"):
                 root.geometry(size)
-                root.update()
-                path = destination / f"desktop-logs-{size}.png"
-                capture(root, path)
-                print(path)
+                for index, page in enumerate(("mission", "rules", "connections", "logs")):
+                    app.notebook.select(index)
+                    settle()
+                    path = destination / f"desktop-{page}-{size}.png"
+                    capture(root, path)
+                    print(path)
+                    if index < 3:
+                        scroll = root.nametowidget(app.notebook.tabs()[index])
+                        scroll.canvas.yview_moveto(1)
+                        settle()
+                        capture(root, destination / f"desktop-{page}-bottom-{size}.png")
+                        scroll.canvas.yview_moveto(0)
+            app.preview_reminder()
+            settle()
+            capture(app.dialog, destination / "desktop-reminder.png")
+            app.dialog.geometry("480x370")
+            settle()
+            capture(app.dialog, destination / "desktop-reminder-small.png")
         finally:
             root.destroy()
 

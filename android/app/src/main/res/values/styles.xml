@@ -7,6 +7,11 @@
         <item name="android:navigationBarColor">#131716</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowBackground">#131716</item>
+        <item name="android:colorBackgroundFloating">#1C2320</item>
+        <item name="android:textColorPrimary">#EDF0E7</item>
+        <item name="android:textColorSecondary">#A8B4AA</item>
+        <item name="android:colorControlNormal">#A8B4AA</item>
+        <item name="android:colorControlActivated">#D7F06C</item>
     </style>
     <string name="accessibility_explanation">仅识别前台应用包名，帮助执行你主动开始的提醒周期。不读取页面正文、消息、密码或按键。可在系统设置随时关闭。手动锁屏仅在应用内另行确认后执行。</string>
 </resources>

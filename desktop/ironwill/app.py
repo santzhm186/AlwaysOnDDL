@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import filedialog, messagebox, ttk
 
 from .core import Engine, Observation, Policy, classify, load_policy, load_snapshot, save_policy, save_snapshot
@@ -28,13 +29,14 @@ from .activity_log import ActivityLog
 from .review_memory import ReviewMemory, CACHE_MODES, review_identity
 
 
-BG = "#111820"
-PANEL = "#18222e"
-FIELD = "#0d141d"
-FG = "#e5edf5"
-MUTED = "#a5b3c2"
-ACCENT = "#8dd9bd"
-WARN = "#f1be7a"
+BG = "#131716"
+PANEL = "#1c2320"
+FIELD = "#141a17"
+FG = "#edf0e7"
+MUTED = "#a8b4aa"
+ACCENT = "#d7f06c"
+WARN = "#edbc7a"
+LINE = "#354139"
 
 
 def _write_json(path: Path, value: dict[str, Any]) -> None:
@@ -57,7 +59,7 @@ class ScrollFrame(ttk.Frame):
         super().__init__(master)
         self.canvas = tk.Canvas(self, bg=BG, highlightthickness=0)
         scrollbar = ttk.Scrollbar(self, orient="vertical", command=self.canvas.yview)
-        self.body = ttk.Frame(self.canvas, padding=(18, 15, 18, 24))
+        self.body = ttk.Frame(self.canvas, padding=(4, 22, 12, 24))
         self.window = self.canvas.create_window((0, 0), window=self.body, anchor="nw")
         self.canvas.configure(yscrollcommand=scrollbar.set)
         self.canvas.grid(row=0, column=0, sticky="nsew")
@@ -66,7 +68,17 @@ class ScrollFrame(ttk.Frame):
         self.columnconfigure(0, weight=1)
         self.body.bind("<Configure>", lambda _event: self.canvas.configure(scrollregion=self.canvas.bbox("all")))
         self.canvas.bind("<Configure>", lambda event: self.canvas.itemconfigure(self.window, width=event.width))
+        # The page also scrolls over labels and cards; text editors keep their own wheel.
+        self.bind("<MouseWheel>", self._wheel)
         self.canvas.bind("<MouseWheel>", self._wheel)
+
+    def connect_wheel(self) -> None:
+        def visit(widget):
+            if not isinstance(widget, (tk.Text, ttk.Entry, ttk.Combobox)):
+                widget.bind("<MouseWheel>", self._wheel, add="+")
+            for child in widget.winfo_children():
+                visit(child)
+        visit(self.body)
 
     def _wheel(self, event: tk.Event) -> None:
         self.canvas.yview_scroll(int(-event.delta / 120), "units")
@@ -175,10 +187,13 @@ class IronWillApp:
         self.root.geometry("1030x820")
         self.root.minsize(820, 650)
         self.root.configure(bg=BG)
-        self.root.option_add("*Font", ("Microsoft YaHei UI", 10))
+        # An option-database *Font overrides individual ttk typography on Windows.
+        for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
+            tkfont.nametofont(name).configure(family="Microsoft YaHei UI", size=10)
         style = ttk.Style(self.root)
         style.theme_use("clam")
-        style.configure(".", background=BG, foreground=FG, font=("Microsoft YaHei UI", 10))
+        style.configure(".", background=BG, foreground=FG, font=("Microsoft YaHei UI", 10),
+                        bordercolor=LINE, lightcolor=LINE, darkcolor=LINE, focuscolor=ACCENT)
         style.configure("TFrame", background=BG)
         style.configure("Card.TFrame", background=PANEL)
         style.configure("TLabel", background=BG, foreground=FG)
@@ -186,40 +201,81 @@ class IronWillApp:
         style.configure("Accent.TLabel", foreground=ACCENT)
         style.configure("Warning.TLabel", foreground=WARN)
         style.configure("Title.TLabel", font=("Microsoft YaHei UI", 24, "bold"))
-        style.configure("Heading.TLabel", font=("Microsoft YaHei UI", 12, "bold"))
-        style.configure("TButton", background=PANEL, foreground=FG, padding=(14, 9), borderwidth=1)
-        style.map("TButton", background=[("active", "#2c4254"), ("disabled", BG)], foreground=[("disabled", "#607080")])
-        style.configure("Primary.TButton", background="#215a4b", foreground="#effff9")
-        style.map("Primary.TButton", background=[("active", "#2c755f"), ("disabled", "#1b302b")])
-        style.configure("TEntry", fieldbackground=FIELD, foreground=FG, insertcolor=FG, padding=7)
-        style.map("TEntry", fieldbackground=[("readonly", FIELD)])
-        style.configure("TCombobox", fieldbackground=FIELD, background=PANEL, foreground=FG, arrowcolor=FG)
+        style.configure("Page.TLabel", font=("Microsoft YaHei UI", 19, "bold"))
+        style.configure("Heading.TLabel", font=("Microsoft YaHei UI", 11, "bold"))
+        style.configure("Eyebrow.TLabel", foreground=ACCENT, font=("Segoe UI", 9, "bold"))
+        style.configure("Metric.TLabel", foreground=FG, font=("Microsoft YaHei UI", 16, "bold"))
+        style.configure("Badge.TLabel", background="#2b3523", foreground=ACCENT, padding=(12, 7))
+        style.configure("TButton", background="#29332d", foreground=FG, padding=(15, 10), borderwidth=0, focusthickness=1)
+        style.map("TButton", background=[("disabled", "#202722"), ("pressed", "#3d4b40"), ("active", "#354239")],
+                  foreground=[("disabled", "#829087")])
+        style.configure("Primary.TButton", background=ACCENT, foreground=BG, font=("Microsoft YaHei UI", 10, "bold"))
+        style.map("Primary.TButton", background=[("disabled", "#323d27"), ("pressed", "#bbd45a"), ("active", "#e4fa92")],
+                  foreground=[("disabled", "#9aa58f"), ("!disabled", BG)])
+        style.configure("TEntry", fieldbackground=FIELD, foreground=FG, insertcolor=FG, padding=(10, 9), borderwidth=1,
+                        lightcolor=LINE, darkcolor=LINE, bordercolor=LINE)
+        style.map("TEntry", fieldbackground=[("readonly", FIELD)], bordercolor=[("focus", ACCENT)])
+        style.configure("TCombobox", fieldbackground=FIELD, background=PANEL, foreground=FG, arrowcolor=MUTED, padding=7,
+                        lightcolor=LINE, darkcolor=LINE, bordercolor=LINE)
         style.map("TCombobox", fieldbackground=[("readonly", FIELD)], foreground=[("readonly", FG)],
                   selectbackground=[("readonly", FIELD)], selectforeground=[("readonly", FG)])
         style.configure("TCheckbutton", background=BG, foreground=FG)
         style.map("TCheckbutton", background=[("active", BG)])
-        style.configure("TNotebook", background=BG, borderwidth=0)
-        style.configure("TNotebook.Tab", background=PANEL, foreground=MUTED, padding=(22, 11))
-        style.map("TNotebook.Tab", background=[("selected", "#294034")], foreground=[("selected", FG)])
-        style.configure("TLabelframe", background=BG, bordercolor="#33414f")
+        style.configure("TNotebook", background=BG, borderwidth=0, bordercolor=BG, lightcolor=BG, darkcolor=BG, tabmargins=(0, 0, 0, 0))
+        style.configure("TNotebook.Tab", background=BG, foreground=MUTED, padding=(25, 12), borderwidth=0,
+                        lightcolor=BG, darkcolor=BG)
+        style.map("TNotebook.Tab", background=[("selected", PANEL), ("active", "#242e27")],
+                  foreground=[("selected", ACCENT), ("active", FG)], lightcolor=[("selected", PANEL)],
+                  padding=[("selected", (25, 12)), ("!selected", (25, 12))], expand=[("selected", (0, 0, 0, 0))])
+        style.configure("TLabelframe", background=BG, bordercolor=LINE)
         style.configure("TLabelframe.Label", background=BG, foreground=FG)
-        style.configure("Treeview", background=FIELD, fieldbackground=FIELD, foreground=FG, rowheight=28)
-        style.configure("Treeview.Heading", background=PANEL, foreground=FG)
-        style.map("Treeview", background=[("selected", "#294f43")], foreground=[("selected", FG)])
+        style.configure("Treeview", background=FIELD, fieldbackground=FIELD, foreground=FG, rowheight=36, borderwidth=0)
+        style.configure("Treeview.Heading", background="#29332d", foreground=MUTED, padding=(10, 9), relief="flat")
+        style.map("Treeview.Heading", background=[("active", "#354239")])
+        style.map("Treeview", background=[("selected", "#3c4d2e")], foreground=[("selected", FG)])
+        style.configure("Vertical.TScrollbar", background="#3c4a40", troughcolor=BG, arrowcolor=MUTED,
+                        borderwidth=0, arrowsize=12)
+        style.configure("TSeparator", background=LINE)
+        for name in ("TLabel", "Muted.TLabel", "Accent.TLabel", "Warning.TLabel", "Heading.TLabel", "Eyebrow.TLabel", "Metric.TLabel"):
+            style.configure("Card." + name, background=PANEL)
+        style.configure("Card.TCheckbutton", background=PANEL)
+        style.map("Card.TCheckbutton", background=[("active", PANEL)])
+
+    def _card(self, parent: tk.Misc, padding=18) -> ttk.Frame:
+        return ttk.Frame(parent, style="Card.TFrame", padding=padding)
+
+    def _copy(self, parent: tk.Misc, text: str = "", **kwargs) -> ttk.Label:
+        label = ttk.Label(parent, text=text, style=kwargs.pop("style", "Muted.TLabel"), wraplength=400, **kwargs)
+        parent.bind("<Configure>", lambda event: label.configure(wraplength=max(160, event.width - 40)), add="+")
+        return label
+
+    def _harmonize_cards(self, widget: tk.Misc, in_card=False) -> None:
+        if isinstance(widget, ttk.Frame) and widget.cget("style") == "Card.TFrame":
+            in_card = True
+        if in_card and isinstance(widget, (ttk.Label, ttk.Frame, ttk.Checkbutton)):
+            current = str(widget.cget("style")) or widget.winfo_class()
+            if not current.startswith("Card."):
+                widget.configure(style="Card." + current)
+        for child in widget.winfo_children():
+            self._harmonize_cards(child, in_card)
 
     def _build(self) -> None:
         outer = ttk.Frame(self.root, padding=20)
         outer.pack(fill="both", expand=True)
         heading = ttk.Frame(outer)
         heading.pack(fill="x")
-        ttk.Label(heading, text="IronWill", style="Title.TLabel").pack(side="left")
-        ttk.Label(heading, text="决定由你作出，提醒按约执行。", style="Muted.TLabel").pack(side="left", padx=20)
+        mark = tk.Canvas(heading, width=42, height=42, background=ACCENT, highlightthickness=0)
+        mark.create_text(21, 21, text="IW", font=("Segoe UI", 16, "bold"), fill=BG)
+        mark.pack(side="left", padx=(0, 12))
+        brand = ttk.Frame(heading)
+        brand.pack(side="left")
+        ttk.Label(brand, text="IronWill", style="Title.TLabel").pack(anchor="w")
         self.state_text = tk.StringVar(value="未开始")
-        ttk.Label(heading, textvariable=self.state_text, style="Accent.TLabel").pack(side="right")
+        ttk.Label(heading, textvariable=self.state_text, style="Badge.TLabel").pack(side="right")
         self.tray_button = ttk.Button(heading, text="最小化到托盘", command=self.minimize_to_tray)
         self.tray_button.pack(side="right", padx=12)
         self.capability_text = tk.StringVar()
-        ttk.Label(outer, textvariable=self.capability_text, style="Muted.TLabel", wraplength=940).pack(fill="x", pady=(9, 16))
+        self._copy(outer, textvariable=self.capability_text).pack(fill="x", pady=(10, 14))
         if self.demo:
             ttk.Label(outer, text="安全体验：不读取窗口、不联网、不锁屏、不写入个人配置。", style="Warning.TLabel").pack(fill="x", pady=(0, 10))
         notebook = ttk.Notebook(outer)
@@ -230,17 +286,22 @@ class IronWillApp:
         notebook.add(mission, text="当前周期")
         notebook.add(rules, text="判定规则")
         notebook.add(connections, text="手机与 AI")
-        logs = ttk.Frame(notebook, padding=14)
+        logs = ttk.Frame(notebook, padding=(4, 22, 12, 4))
         notebook.add(logs, text="判断日志")
         self._build_mission(mission.body)
         self._build_rules(rules.body)
         self._build_connections(connections.body)
         self._build_logs(logs)
+        self._harmonize_cards(outer)
+        for page in (mission, rules, connections):
+            page.connect_wheel()
         footer = ttk.Frame(outer)
         footer.pack(side="bottom", fill="x", pady=(12, 0), before=notebook)
         self.status_text = tk.StringVar(value="尚未开始。保存目标后，由你决定何时开始这个周期。")
         ttk.Button(footer, text="关于与许可", command=self.show_licenses).pack(side="right", padx=(10, 0))
-        ttk.Label(footer, textvariable=self.status_text, style="Muted.TLabel", wraplength=660).pack(side="left", fill="x", expand=True)
+        status_label = ttk.Label(footer, textvariable=self.status_text, style="Muted.TLabel", wraplength=580)
+        status_label.pack(side="left", fill="x", expand=True)
+        status_label.bind("<Configure>", lambda event: status_label.configure(wraplength=max(160, event.width)))
         self._refresh_status()
 
     def show_licenses(self) -> None:
@@ -259,21 +320,19 @@ class IronWillApp:
         text.configure(state="disabled")
 
     def _build_logs(self, parent: ttk.Frame) -> None:
-        ttk.Label(parent, text="判断日志与 AI 通信", style="Heading.TLabel").pack(anchor="w")
-        ttk.Label(parent, text="点击条目查看详情。记录变化及每分钟的持续判断；AI 缓存与实际请求分别标明。\n"
-                  "日志仅保存在本机，隐私窗口不记标题，Key 不进入日志。最多两份各 2 MiB，页面显示最近 1000 条。",
-                  style="Muted.TLabel", wraplength=900).pack(anchor="w", pady=(5, 10))
+        ttk.Label(parent, text="每一次判断，都有迹可循。", style="Page.TLabel").pack(anchor="w")
+        self._copy(parent, "AI 请求与缓存分别标明。隐私标题与 Key 不入日志；选择记录查看详情。").pack(fill="x", pady=(5, 14))
         toolbar = ttk.Frame(parent)
         toolbar.pack(fill="x", pady=(0, 10))
         self.log_filter = tk.StringVar(value="全部")
-        ttk.Combobox(toolbar, textvariable=self.log_filter, state="readonly", width=10,
+        ttk.Combobox(toolbar, textvariable=self.log_filter, state="readonly", width=7,
                      values=("全部", "判断", "AI通信", "程序")).pack(side="left")
-        ttk.Label(toolbar, text="搜索").pack(side="left", padx=(12, 6))
+        ttk.Label(toolbar, text="搜索", style="Muted.TLabel").pack(side="left", padx=(12, 8))
         self.log_search = tk.StringVar()
-        ttk.Entry(toolbar, textvariable=self.log_search, width=21).pack(side="left", fill="x", expand=True)
+        ttk.Entry(toolbar, textvariable=self.log_search, width=12).pack(side="left", fill="x", expand=True)
         self.log_follow = tk.BooleanVar(value=True)
-        ttk.Checkbutton(toolbar, text="跟随最新", variable=self.log_follow).pack(side="left", padx=8)
-        ttk.Button(toolbar, text="导出筛选结果", command=self.export_logs).pack(side="left", padx=(0, 6))
+        ttk.Checkbutton(toolbar, text="跟随最新", variable=self.log_follow).pack(side="left", padx=10)
+        ttk.Button(toolbar, text="导出结果", command=self.export_logs).pack(side="left", padx=(0, 8))
         ttk.Button(toolbar, text="清空日志", command=self.clear_logs).pack(side="left")
         panes = ttk.Panedwindow(parent, orient="vertical")
         panes.pack(fill="both", expand=True)
@@ -282,28 +341,29 @@ class IronWillApp:
         panes.add(lower, weight=3)
         last_height = [0]
         def size_panes(event):
-            if event.height > 160 and event.height != last_height[0]:
+            if event.height > 120 and event.height != last_height[0]:
                 last_height[0] = event.height
                 panes.sashpos(0, max(70, int(event.height * 0.43)))
         panes.bind("<Configure>", size_panes)
-        self.log_tree = ttk.Treeview(upper, columns=("time", "category", "summary"), show="headings", height=8)
-        for name, label, width in (("time", "时间", 165), ("category", "类别", 75), ("summary", "判断 / 通信摘要", 560)):
-            self.log_tree.heading(name, text=label)
+        self.log_tree = ttk.Treeview(upper, columns=("time", "category", "summary"), show="headings", height=3)
+        for name, label, width in (("time", "时间", 165), ("category", "类别", 80), ("summary", "判断 / 通信摘要", 430)):
+            self.log_tree.heading(name, text=label, anchor="w")
             self.log_tree.column(name, width=width, minwidth=60, stretch=name == "summary")
         scrollbar = ttk.Scrollbar(upper, orient="vertical", command=self.log_tree.yview)
         self.log_tree.configure(yscrollcommand=scrollbar.set)
+        self.log_tree.tag_configure("alternate", background="#1c2420")
         self.log_tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-        ttk.Label(lower, text="选中记录 · 详细内容", style="Muted.TLabel").pack(anchor="w", pady=(10, 5))
+        ttk.Label(lower, text="通信与判断详情", style="Heading.TLabel").pack(anchor="w", pady=(14, 8))
         detail_body = ttk.Frame(lower)
         detail_body.pack(fill="both", expand=True)
-        self.log_detail = self._text(detail_body, 8)
+        self.log_detail = self._text(detail_body, 3)
         detail_scroll = ttk.Scrollbar(detail_body, orient="vertical", command=self.log_detail.yview)
         self.log_detail.configure(yscrollcommand=detail_scroll.set, state="disabled")
         self.log_detail.pack(side="left", fill="both", expand=True)
         detail_scroll.pack(side="right", fill="y")
         self.log_status = tk.StringVar()
-        ttk.Label(parent, textvariable=self.log_status, style="Muted.TLabel", wraplength=900).pack(anchor="w", pady=(8, 0))
+        self._copy(parent, textvariable=self.log_status).pack(side="bottom", fill="x", pady=(8, 0), before=panes)
         self._visible_logs = {}
         self.log_tree.bind("<<TreeviewSelect>>", lambda _event: self._show_log_detail())
         self.log_filter.trace_add("write", lambda *_: self._refresh_logs(force=True))
@@ -330,9 +390,10 @@ class IronWillApp:
         entries = self._filtered_logs()
         self._visible_logs = {entry["id"]: entry for entry in entries}
         self.log_tree.delete(*self.log_tree.get_children())
-        for entry in entries:
+        for index, entry in enumerate(entries):
             self.log_tree.insert("", "end", iid=entry["id"], values=(
-                entry["timestamp"].replace("T", " ")[:19], entry["category"], entry["summary"]))
+                entry["timestamp"].replace("T", " ")[:19], entry["category"], entry["summary"]),
+                tags=("alternate",) if index % 2 else ())
         target = selected[0] if selected and selected[0] in self._visible_logs else None
         if self.log_follow.get() and entries:
             target = entries[0]["id"]
@@ -425,81 +486,101 @@ class IronWillApp:
 
     def _text(self, parent: tk.Misc, height: int = 3) -> tk.Text:
         return tk.Text(parent, height=height, bg=FIELD, fg=FG, insertbackground=FG,
-                       selectbackground="#3d665b", relief="flat", borderwidth=0,
-                       padx=10, pady=8, wrap="word", undo=True)
+                       font=("Microsoft YaHei UI", 10),
+                       selectbackground="#405631", selectforeground=FG, relief="flat", borderwidth=0,
+                       highlightthickness=1, highlightbackground=LINE, highlightcolor=ACCENT,
+                       padx=12, pady=11, spacing1=2, spacing3=3, wrap="word", undo=True)
 
     def _build_mission(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
-        ttk.Label(parent, text="这一轮，你已经决定做什么", style="Heading.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(parent, text="写当前主线。程序提醒你回到它，成果由你判断。", style="Muted.TLabel").grid(row=1, column=0, sticky="w", pady=(3, 8))
-        goal = self._text(parent, 3)
-        goal.grid(row=2, column=0, sticky="ew", pady=(0, 14))
-        goal.insert("1.0", self.settings.get("goal", ""))
-        self.text_fields["goal"] = goal
-        pair = ttk.Frame(parent)
-        pair.grid(row=3, column=0, sticky="ew")
-        pair.columnconfigure(0, weight=1)
-        pair.columnconfigure(1, weight=1)
-        for column, (key, title) in enumerate((("reality", "现实 · 你自己的原话"), ("consequence", "后果 · 你自己的原话"))):
-            frame = ttk.Frame(pair, padding=(0 if column == 0 else 7, 0, 7 if column == 0 else 0, 0))
-            frame.grid(row=0, column=column, sticky="nsew")
-            ttk.Label(frame, text=title).pack(anchor="w", pady=(0, 7))
-            widget = self._text(frame, 4)
-            widget.pack(fill="x")
-            widget.insert("1.0", self.settings.get(key, ""))
-            self.text_fields[key] = widget
-        ttk.Label(parent, text="大愿 · 关于你要成为谁的标准", style="Heading.TLabel").grid(row=4, column=0, sticky="w", pady=(16, 7))
-        oath = self._text(parent, 3)
-        oath.grid(row=5, column=0, sticky="ew")
-        oath.insert("1.0", self.settings.get("oath", ""))
-        self.text_fields["oath"] = oath
-        sigrow = ttk.Frame(parent)
-        sigrow.grid(row=6, column=0, sticky="ew", pady=(12, 0))
-        ttk.Label(sigrow, text="署名（可留空）").pack(side="left")
-        self.signature = tk.StringVar(value=self.settings.get("signature", ""))
-        ttk.Entry(sigrow, textvariable=self.signature, width=24).pack(side="left", padx=10)
-        ttk.Button(sigrow, text="保存本页", command=self.save_identity).pack(side="right")
+        ttk.Label(parent, text="把决定，变成行动。", style="Page.TLabel").grid(row=0, column=0, sticky="w")
+        self._copy(parent, "只专注于这一轮。写下主线，准备好时开始。").grid(row=1, column=0, sticky="ew", pady=(5, 16))
         actions = ttk.Frame(parent)
-        actions.grid(row=7, column=0, sticky="ew", pady=(20, 10))
-        self.start_button = ttk.Button(actions, text="开始周期", style="Primary.TButton", command=self.start)
+        actions.grid(row=2, column=0, sticky="ew", pady=(0, 18))
+        self.start_button = ttk.Button(actions, text="开始周期  →", style="Primary.TButton", command=self.start)
         self.start_button.pack(side="left")
         self.pause_button = ttk.Button(actions, text="暂停", command=self.pause_resume)
         self.pause_button.pack(side="left", padx=8)
         self.end_button = ttk.Button(actions, text="结束周期", command=self.end)
         self.end_button.pack(side="left")
         ttk.Button(actions, text="体验提醒", command=self.preview_reminder).pack(side="right")
-        ttk.Label(parent, text="没有每日固定钟点。开始、暂停、继续和结束都由你决定；重新打开软件不会自动接续上次监督。",
-                  style="Muted.TLabel", wraplength=900).grid(row=8, column=0, sticky="w", pady=5)
-        ttk.Label(parent, text="本版保留自毁保险，不实现删除或卸载。体验提醒不会升档，也不会记录惩罚。",
-                  style="Muted.TLabel", wraplength=900).grid(row=9, column=0, sticky="w", pady=5)
-        diagnosis = ttk.LabelFrame(parent, text="当前判断 · 为什么提醒或保持安静", padding=12)
-        diagnosis.grid(row=10, column=0, sticky="ew", pady=(15, 5))
+        metrics = self._card(parent, (18, 12))
+        metrics.grid(row=3, column=0, sticky="ew", pady=(0, 14))
+        self.api_metric = tk.StringVar(value="0 次")
+        self.cache_metric = tk.StringVar(value="0 次")
+        for column, (title, value) in enumerate((("当前状态", self.state_text), ("本次 API 请求", self.api_metric), ("窗口结论复用", self.cache_metric))):
+            metrics.columnconfigure(column, weight=1, uniform="metrics")
+            cell = ttk.Frame(metrics)
+            cell.grid(row=0, column=column, sticky="ew", padx=(0, 12))
+            ttk.Label(cell, text=title, style="Muted.TLabel").pack(anchor="w")
+            ttk.Label(cell, textvariable=value, style="Metric.TLabel").pack(anchor="w", pady=(4, 0))
+        main = self._card(parent)
+        main.grid(row=4, column=0, sticky="ew", pady=(0, 14))
+        top = ttk.Frame(main)
+        top.pack(fill="x", pady=(0, 12))
+        ttk.Label(top, text="01  /  当前主线", style="Heading.TLabel").pack(side="left")
+        ttk.Button(top, text="保存本页", command=self.save_identity).pack(side="right")
+        goal = self._text(main, 2)
+        goal.configure(font=("Microsoft YaHei UI", 13))
+        goal.pack(fill="x")
+        goal.insert("1.0", self.settings.get("goal", ""))
+        self.text_fields["goal"] = goal
+        pair = ttk.Frame(parent)
+        pair.grid(row=5, column=0, sticky="ew", pady=(0, 14))
+        pair.columnconfigure(0, weight=1, uniform="reasons")
+        pair.columnconfigure(1, weight=1, uniform="reasons")
+        for column, (key, title) in enumerate((("reality", "现实 · 你自己的原话"), ("consequence", "后果 · 你自己的原话"))):
+            frame = self._card(pair)
+            frame.grid(row=0, column=column, sticky="nsew", padx=(0, 7) if column == 0 else (7, 0))
+            ttk.Label(frame, text=title, style="Heading.TLabel").pack(anchor="w", pady=(0, 11))
+            widget = self._text(frame, 3)
+            widget.configure(width=20)
+            widget.pack(fill="x")
+            widget.insert("1.0", self.settings.get(key, ""))
+            self.text_fields[key] = widget
+        promise = self._card(parent)
+        promise.grid(row=6, column=0, sticky="ew", pady=(0, 14))
+        ttk.Label(promise, text="02  /  大愿与署名", style="Heading.TLabel").pack(anchor="w")
+        self._copy(promise, "关于你要成为谁的标准，保留你自己的原话。").pack(fill="x", pady=(5, 12))
+        oath = self._text(promise, 2)
+        oath.pack(fill="x")
+        oath.insert("1.0", self.settings.get("oath", ""))
+        self.text_fields["oath"] = oath
+        sigrow = ttk.Frame(promise)
+        sigrow.pack(fill="x", pady=(12, 0))
+        ttk.Label(sigrow, text="署名（可留空）").pack(side="left")
+        self.signature = tk.StringVar(value=self.settings.get("signature", ""))
+        ttk.Entry(sigrow, textvariable=self.signature, width=24).pack(side="left", padx=10)
+        diagnosis = self._card(parent)
+        diagnosis.grid(row=7, column=0, sticky="ew", pady=(0, 14))
+        ttk.Label(diagnosis, text="03  /  当前判断", style="Heading.TLabel").pack(anchor="w", pady=(0, 9))
         self.observation_text = tk.StringVar(value="尚未开始采样。")
-        ttk.Label(diagnosis, textvariable=self.observation_text, wraplength=850,
-                  style="Muted.TLabel").pack(anchor="w", fill="x")
+        self._copy(diagnosis, textvariable=self.observation_text).pack(fill="x")
+        self._copy(parent, "没有固定钟点。开始、暂停、继续和结束都由你决定；重新打开软件不会自动接续监督。体验提醒不升档，不记录惩罚。").grid(row=8, column=0, sticky="ew")
 
     def _build_rules(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
-        ttk.Label(parent, text="本地规则先判断，拿不准就放行", style="Heading.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(parent, text="每行一个关键词。隐私规则优先；浏览器等通用容器不建议整进程标为主线或红线。",
-                  style="Muted.TLabel", wraplength=900).grid(row=1, column=0, sticky="w", pady=(5, 14))
+        ttk.Label(parent, text="给这一轮，划清边界。", style="Page.TLabel").grid(row=0, column=0, sticky="w")
+        self._copy(parent, "本地规则优先，拿不准就放行。每行填写一个关键词；浏览器不建议整进程归类。").grid(row=1, column=0, sticky="ew", pady=(5, 18))
         lists = ttk.Frame(parent)
         lists.grid(row=2, column=0, sticky="ew")
-        lists.columnconfigure(0, weight=1)
-        lists.columnconfigure(1, weight=1)
+        lists.columnconfigure(0, weight=1, uniform="rules")
+        lists.columnconfigure(1, weight=1, uniform="rules")
         definitions = [
-            ("privacy_keywords", "隐私关键词 · 不交给 AI"),
-            ("blocked_processes", "红线进程 · 例如明确的娱乐应用"),
-            ("blocked_titles", "红线标题关键词 · 可留空，未匹配标题由已启用 AI 审核"),
-            ("allowed_processes", "主线进程 · 当前工作的专用工具"),
-            ("allowed_titles", "主线标题关键词"),
+            ("privacy_keywords", "隐私关键词", "优先保护，不交给 AI。"),
+            ("blocked_processes", "红线进程", "例如明确的娱乐应用。"),
+            ("blocked_titles", "红线标题关键词", "可留空，未匹配标题可由已启用 AI 审核。"),
+            ("allowed_processes", "主线进程", "当前工作的专用工具。"),
+            ("allowed_titles", "主线标题关键词", "与当前主线有关的页面或项目。"),
         ]
         values = self.policy.to_dict()
-        for index, (key, title) in enumerate(definitions):
-            cell = ttk.Frame(lists, padding=(0 if index % 2 == 0 else 8, 0, 8 if index % 2 == 0 else 0, 12))
-            cell.grid(row=index // 2, column=index % 2, sticky="nsew")
-            ttk.Label(cell, text=title).pack(anchor="w", pady=(0, 6))
+        for index, (key, title, help_text) in enumerate(definitions):
+            cell = self._card(lists)
+            cell.grid(row=index // 2, column=index % 2, sticky="nsew", padx=(0, 7) if index % 2 == 0 else (7, 0), pady=(0, 14))
+            ttk.Label(cell, text=title, style="Heading.TLabel").pack(anchor="w")
+            self._copy(cell, help_text).pack(fill="x", pady=(5, 10))
             widget = self._text(cell, 3)
+            widget.configure(width=20)
             widget.pack(fill="x")
             widget.insert("1.0", "\n".join(values.get(key, [])))
             self.rule_fields[key] = widget
@@ -510,22 +591,27 @@ class IronWillApp:
             ("recovery_seconds", "回主线后恢复"), ("quiet_seconds", "喘息时长"),
             ("idle_threshold_seconds", "离开设备判定"),
         ]):
-            column, row = (index % 3) * 2, index // 3
+            column, row = (index % 2) * 2, index // 2
             ttk.Label(timings, text=title).grid(row=row, column=column, sticky="w", padx=(0, 7), pady=5)
             var = tk.StringVar(value=str(values.get(key, 60)))
             self.numeric_fields[key] = var
             ttk.Entry(timings, textvariable=var, width=7).grid(row=row, column=column + 1, sticky="w", padx=(0, 17), pady=5)
         self.lock_enabled = tk.BooleanVar(value=bool(values.get("lock_enabled", False)) and not self.demo)
-        ttk.Checkbutton(parent, text="启用锁屏权限：仅第三档中，我明确点击“锁屏”时执行 Windows 锁屏。",
+        ttk.Checkbutton(parent, text="启用锁屏权限：仅第三档中明确点击“锁屏”时执行。",
                         variable=self.lock_enabled, command=self._lock_permission_changed).grid(row=4, column=0, sticky="w", pady=(0, 8))
-        ttk.Label(parent, text="默认关闭。不会自动锁屏，不拦截系统退出，也不实现自毁。", style="Muted.TLabel").grid(row=5, column=0, sticky="w")
+        self._copy(parent, "默认关闭。不会自动锁屏，不拦截系统退出，也不实现自毁。").grid(row=5, column=0, sticky="ew")
         ttk.Button(parent, text="保存并应用规则", style="Primary.TButton", command=self.save_rules).grid(row=6, column=0, sticky="e", pady=(14, 0))
 
     def _build_connections(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
+        container = parent
+        ttk.Label(container, text="按需连接，保持简单。", style="Page.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 18))
+        parent = self._card(container)
+        parent.grid(row=1, column=0, sticky="ew", pady=(0, 14))
+        parent.columnconfigure(0, weight=1)
         ttk.Label(parent, text="手机配对 · 同一局域网", style="Heading.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Label(parent, text="点击启动后才开放本机配对服务。仅在信任的局域网使用；手机将收到当前目标、大愿和周期状态。\n"
-                  "两端各自识别本机活动；短时间提醒去重不等于跨设备共享处罚或升档。", style="Muted.TLabel", wraplength=900).grid(row=1, column=0, sticky="w", pady=(6, 12))
+        self._copy(parent, "点击启动后才开放本机配对服务。仅在信任的局域网使用；手机将收到当前目标、大愿和周期状态。\n"
+                  "两端各自识别本机活动；短时间提醒去重不等于跨设备共享处罚或升档。").grid(row=1, column=0, sticky="ew", pady=(6, 12))
         relay_buttons = ttk.Frame(parent)
         relay_buttons.grid(row=2, column=0, sticky="ew", pady=(0, 10))
         self.relay_start_button = ttk.Button(relay_buttons, text="启动手机配对", command=self.start_relay)
@@ -533,7 +619,7 @@ class IronWillApp:
         self.relay_stop_button = ttk.Button(relay_buttons, text="停止配对", command=self.stop_relay, state="disabled")
         self.relay_stop_button.pack(side="left", padx=8)
         self.relay_status = tk.StringVar(value="尚未启动；未开放网络端口。")
-        ttk.Label(parent, textvariable=self.relay_status, style="Muted.TLabel", wraplength=880).grid(row=3, column=0, sticky="w", pady=(0, 10))
+        self._copy(parent, textvariable=self.relay_status).grid(row=3, column=0, sticky="ew", pady=(0, 10))
         self.address_value = tk.StringVar(value="启动后显示")
         self.token_value = tk.StringVar(value="点击“显示口令”后显示")
         self.fingerprint_value = tk.StringVar(value="启动后显示")
@@ -552,12 +638,14 @@ class IronWillApp:
         self.show_token_button = ttk.Button(parent, text="显示口令", command=self.toggle_pair_secret)
         self.show_token_button.grid(row=5, column=0, sticky="e", pady=(4, 8))
         self.peers_value = tk.StringVar(value="手机：尚未连接")
-        ttk.Label(parent, textvariable=self.peers_value, style="Accent.TLabel", wraplength=880).grid(row=6, column=0, sticky="w", pady=(0, 20))
-        ttk.Separator(parent).grid(row=7, column=0, sticky="ew", pady=(0, 18))
+        self._copy(parent, textvariable=self.peers_value, style="Accent.TLabel").grid(row=6, column=0, sticky="ew", pady=(8, 0))
+        parent = self._card(container)
+        parent.grid(row=2, column=0, sticky="ew")
+        parent.columnconfigure(0, weight=1)
         ttk.Label(parent, text="AI 灰区判断 · 可留空，离线也可监督", style="Heading.TLabel").grid(row=8, column=0, sticky="w")
-        ttk.Label(parent, text="AI 只判断与当前主线的相关性。它不会评价成果、决定升档或执行锁屏。\n"
-                  "启用后，只有本地规则拿不准的窗口才发送当前目标、进程名和必要的窗口标题。现实、后果、大愿和署名不发给模型。",
-                  style="Muted.TLabel", wraplength=900).grid(row=9, column=0, sticky="w", pady=(6, 12))
+        self._copy(parent, "AI 只判断与当前主线的相关性。它不会评价成果、决定升档或执行锁屏。\n"
+                  "启用后，仅发送当前目标、进程名和必要的窗口标题。现实、后果、大愿和署名不发给模型。\n"
+                  "单字符分类：1 核心相关 / 2 辅助或中立 / 0 明确无关。请求最多 1 个输出 token；官方 DeepSeek 自动关闭思考。显示说明由本机生成。").grid(row=9, column=0, sticky="ew", pady=(6, 12))
         ai_form = ttk.Frame(parent)
         ai_form.grid(row=10, column=0, sticky="ew")
         ai_form.columnconfigure(1, weight=1)
@@ -567,26 +655,23 @@ class IronWillApp:
         for row, (title, var) in enumerate([("兼容服务地址", self.ai_endpoint), ("模型名称", self.ai_model), ("API 密钥", self.ai_key)]):
             ttk.Label(ai_form, text=title).grid(row=row, column=0, sticky="w", padx=(0, 12), pady=5)
             ttk.Entry(ai_form, textvariable=var, show="●" if row == 2 else "").grid(row=row, column=1, sticky="ew", pady=5)
-        ttk.Label(parent, text="Key 已保存时可以留空，应用设置会自动读取。也支持 IRONWILL_API_KEY；旧 DEEPSEEK_API_KEY 仅用于官方 DeepSeek 地址。",
-                  style="Muted.TLabel", wraplength=900).grid(row=11, column=0, sticky="w", pady=(8, 8))
+        self._copy(parent, "Key 已保存时可以留空，应用设置会自动读取。也支持 IRONWILL_API_KEY；旧 DEEPSEEK_API_KEY 仅用于官方 DeepSeek 地址。").grid(row=11, column=0, sticky="ew", pady=(8, 8))
         self.ai_enabled = tk.BooleanVar(value=False)
         ttk.Checkbutton(parent, text="本次运行启用 AI，并同意向所填服务发送上述最少信息", variable=self.ai_enabled,
                         command=self._ai_permission_changed).grid(row=12, column=0, sticky="w", pady=7)
         self.ai_status = tk.StringVar(value="AI 未启用，按本地规则工作。")
-        ttk.Label(parent, textvariable=self.ai_status, style="Muted.TLabel", wraplength=880).grid(row=13, column=0, sticky="w", pady=7)
+        self._copy(parent, textvariable=self.ai_status).grid(row=13, column=0, sticky="ew", pady=7)
         ttk.Button(parent, text="应用 AI 设置", command=self.apply_ai).grid(row=14, column=0, sticky="e")
         self.connection_test_button = ttk.Button(parent, text="用虚拟数据测试 AI 连接", command=self.test_ai_connection)
         self.connection_test_button.grid(row=15, column=0, sticky="e", pady=(10, 0))
         self.connection_test_text = tk.StringVar(value="测试会发出一次虚拟请求，不发送你的任务或真实窗口标题。")
-        ttk.Label(parent, textvariable=self.connection_test_text, style="Muted.TLabel",
-                  wraplength=880).grid(row=16, column=0, sticky="w", pady=(7, 0))
+        self._copy(parent, textvariable=self.connection_test_text).grid(row=16, column=0, sticky="ew", pady=(7, 0))
         self.remember_api_key = tk.BooleanVar(value=not self.demo and self.key_store.exists())
         ttk.Checkbutton(parent, text="在本机记住 API Key（使用 Windows 账户加密，应用设置后生效）",
                         variable=self.remember_api_key).grid(row=17, column=0, sticky="w", pady=(14, 5))
         self.key_storage_text = tk.StringVar(value=("已有加密 Key；应用同一服务时自动读取，不在输入框回显。" if self.remember_api_key.get()
                                                    else "尚未记住 Key。勾选后应用设置，下次无需再次填写。"))
-        ttk.Label(parent, textvariable=self.key_storage_text, style="Muted.TLabel",
-                  wraplength=880).grid(row=18, column=0, sticky="w", pady=(0, 6))
+        self._copy(parent, textvariable=self.key_storage_text).grid(row=18, column=0, sticky="ew", pady=(0, 6))
         key_buttons = ttk.Frame(parent)
         key_buttons.grid(row=19, column=0, sticky="e")
         ttk.Button(key_buttons, text="从旧版 DeepSeek 文件导入", command=self.import_legacy_key).pack(side="left", padx=(0, 8))
@@ -599,11 +684,10 @@ class IronWillApp:
         ttk.Combobox(cache_controls, textvariable=self.ai_cache_mode, state="readonly", width=14,
                      values=tuple(CACHE_MODES)).pack(side="left")
         ttk.Button(cache_controls, text="清空判断缓存", command=self.clear_ai_memory).pack(side="right")
-        ttk.Label(parent, text="默认本工作周期内复用同一进程和页面标题的结论，应用 AI 设置后生效。\n"
-                  "新标题停留至少 3 秒才审核，自动请求至少间隔 30 秒；进程/关键词本地规则优先。",
-                  style="Muted.TLabel", wraplength=880).grid(row=21, column=0, sticky="w", pady=(3, 6))
+        self._copy(parent, "默认本工作周期内复用同一进程和页面标题的结论，应用 AI 设置后生效。\n"
+                  "新标题停留至少 3 秒才审核，自动请求至少间隔 30 秒；进程/关键词本地规则优先。").grid(row=21, column=0, sticky="ew", pady=(3, 6))
         self.review_status = tk.StringVar()
-        ttk.Label(parent, textvariable=self.review_status, style="Muted.TLabel", wraplength=880).grid(row=22, column=0, sticky="w")
+        self._copy(parent, textvariable=self.review_status).grid(row=22, column=0, sticky="ew")
 
     def clear_ai_memory(self, prompt: bool = True) -> None:
         if prompt and not messagebox.askyesno("清空判断缓存", "确定要清空已审核窗口的缓存吗？后续相同窗口将重新由 AI 审核。", parent=self.root):
@@ -894,7 +978,12 @@ class IronWillApp:
         dialog.protocol("WM_DELETE_WINDOW", self._close_reminder)
         content = ttk.Frame(dialog, padding=24)
         content.pack(fill="both", expand=True)
-        ttk.Label(content, text="体验提醒" if preview else ("语义提醒 · 由你判断" if advisory else "回到你的决定"), style="Heading.TLabel").pack(anchor="w")
+        ttk.Label(content, text="IRONWILL  /  " + ("PREVIEW" if preview else "REMINDER"), style="Eyebrow.TLabel").pack(anchor="w", pady=(0, 8))
+        title_row = ttk.Frame(content)
+        title_row.pack(fill="x")
+        ttk.Label(title_row, text="体验提醒" if preview else ("语义提醒 · 由你判断" if advisory else "回到你的决定"), style="Page.TLabel").pack(side="left")
+        if preview:
+            ttk.Button(title_row, text="看第三档", command=lambda: self._show_reminder(3, "你写下的决定仍在这里。回到主线。", preview=True)).pack(side="right")
         line = message if message.strip() else ("这是第三次提醒。回到主线。" if stage >= 3 else "你已经决定了这一轮的主线。现在回去。")
         goal = self._identity()["goal"] if preview else self.engine.state.get("goal", "")
         body = self._text(content, 10)
@@ -902,7 +991,6 @@ class IronWillApp:
         if preview and stage >= 3 and self._identity()["oath"]:
             body.insert("end", "\n\n你写下的大愿：\n" + self._identity()["oath"])
         body.configure(state="disabled", font=("Microsoft YaHei UI", 12))
-        body.pack(fill="both", expand=True, pady=(16, 12))
         buttons = ttk.Frame(content)
         buttons.pack(fill="x", side="bottom")
         if advisory:
@@ -915,14 +1003,13 @@ class IronWillApp:
         elif not advisory:
             ttk.Button(buttons, text="锁屏", command=lambda: self._choose("LOCK", preview=preview),
                        state="normal" if self.policy.lock_enabled and not self.demo else "disabled").pack(side="left", padx=8)
-        if preview:
-            ttk.Button(buttons, text="看第三档", command=lambda: self._show_reminder(3, "你写下的决定仍在这里。回到主线。", preview=True)).pack(side="right")
         if advisory:
-            ttk.Label(content, text="这里只提供相关性建议，不增加档位，不执行锁屏。", wraplength=550, style="Muted.TLabel").pack(side="bottom", anchor="w", pady=10)
+            self._copy(content, "这里只提供相关性建议，不增加档位，不执行锁屏。").pack(side="bottom", fill="x", pady=10)
         elif stage >= 3:
-            ttk.Label(content, text="第三档只提供返回与显式锁屏。关闭提醒不会自动锁屏。", wraplength=550, style="Muted.TLabel").pack(side="bottom", anchor="w", pady=10)
+            self._copy(content, "第三档只提供返回与显式锁屏。关闭提醒不会自动锁屏。").pack(side="bottom", fill="x", pady=10)
         elif preview:
-            ttk.Label(content, text="本窗口只是体验。任何选择都不会改变当前周期。", wraplength=550, style="Muted.TLabel").pack(side="bottom", anchor="w", pady=10)
+            self._copy(content, "本窗口只是体验。任何选择都不会改变当前周期。").pack(side="bottom", fill="x", pady=10)
+        body.pack(fill="both", expand=True, pady=(16, 12))
         # Non-modal by design: no grab_set(), wait_window(), or nested mainloop.
         dialog.lift()
 
@@ -963,6 +1050,8 @@ class IronWillApp:
         ai = "AI 已启用" if self.ai else "AI 离线"
         lock = "锁屏需明确点击" if self.policy.lock_enabled and not self.demo else "锁屏权限关闭"
         self.capability_text.set("%s  ·  %s  ·  %s  ·  自毁保险保留" % (windows, ai, lock))
+        self.api_metric.set(f"{self.ai_api_count} 次")
+        self.cache_metric.set(f"{self.ai_cache_hits} 次")
         self._refresh_observation_status()
         self._refresh_logs()
         self.review_status.set(self.review_memory.warning or
@@ -976,7 +1065,7 @@ class IronWillApp:
                    "local_classification": local, "engine_classification": state.get("last_classification"),
                    "drift_seconds": round(float(state.get("drift_seconds", 0)), 1),
                    "quiet_remaining": round(float(state.get("quiet_remaining", 0)), 1)}
-        semantic = observation.semantic if observation.semantic in {"related", "unrelated", "unknown"} else "unknown"
+        semantic = observation.semantic if observation.semantic in {"related", "neutral", "unrelated", "unknown"} else "unknown"
         if local == "PRIVATE":
             summary = "隐私规则命中：标题和进程不记录，不请求 AI，不累计偏离"
         elif observation.locked:
@@ -1004,6 +1093,8 @@ class IronWillApp:
                 summary = "本地规则未匹配，AI 未启用：没有审核结论"
             elif semantic == "related":
                 summary = "AI 判断与主线相关：可参与连续回归计时"
+            elif semantic == "neutral":
+                summary = "AI 分类为辅助/中立：保持安静，不累计偏离，也不清除已有档位"
             elif semantic == "unrelated":
                 summary = "AI 判断可能偏离：仅语义提醒，不累计本地红线档位"
             else:
@@ -1076,10 +1167,11 @@ class IronWillApp:
                      and time.monotonic() - details["timestamp"] < 60)
             if fresh:
                 labels = {"related": "AI 判断与当前主线相关，本次保持安静。",
+                          "neutral": "AI 分类为辅助/中立，保持安静；不认定已回到主线。",
                           "unrelated": "AI 判断可能偏离，按语义提醒处理（不升档）。",
                           "unknown": "AI 暂无明确的相关性结论。"}
                 verdict = labels[details["verdict"]] if details["available"] else "AI 审核未完成，这不代表你在专注。"
-                verdict += "\n" + ("最近结果来自缓存。" if details["cached"] else "") + "原因：" + details["reason"]
+                verdict += "\n" + ("最近结果来自缓存。" if details["cached"] else "") + "分类说明/诊断：" + details["reason"]
             else:
                 verdict = "正在审核这个标题。" if self.ai_pending else (self.ai_wait_reason or "未匹配标题将交给 AI，等待下一次审核。")
             verdict += f"\n本次实际 API 请求 {self.ai_api_count} 次；窗口缓存复用 {self.ai_cache_hits} 次。"
@@ -1356,7 +1448,7 @@ class IronWillApp:
                 if session_id != self.engine.state.get("id") or self.engine.state.get("status") != "active" or not self.ai:
                     continue
                 verdict = result.get("verdict", "unknown")
-                if verdict not in {"related", "unrelated", "unknown"}:
+                if verdict not in {"related", "neutral", "unrelated", "unknown"}:
                     verdict = "unknown"
                 self.semantic_result = (process, title, verdict, time.monotonic())
                 available = bool(result.get("available", False))
@@ -1375,9 +1467,10 @@ class IronWillApp:
                                         "process": process, "title": title, "verdict": verdict,
                                         "timestamp": time.monotonic(), "reason": reason,
                                         "cached": bool(result.get("cached", False)), "available": available}
-                label = ({"related": "最近标题审核：与主线相关。", "unrelated": "最近标题审核：可能偏离，仅作提醒。",
+                label = ({"related": "最近标题审核：1 核心相关。", "neutral": "最近标题审核：2 辅助/中立，保持安静。",
+                          "unrelated": "最近标题审核：0 明确无关，仅作提醒。",
                           "unknown": "最近标题审核：信息不足，未作结论。"}[verdict] if available else "最近标题审核未完成。")
-                self.ai_status.set(label + "原因：" + reason)
+                self.ai_status.set(label + "分类说明/诊断：" + reason)
             elif item[0] == "ai_connection":
                 _, test_id, generation, result = item[:4]
                 if test_id != self.connection_test_id:
@@ -1387,7 +1480,7 @@ class IronWillApp:
                 if generation != self.ai_generation or not self.ai:
                     self.connection_test_text.set("设置或周期已变化，请按当前设置重新测试。")
                     continue
-                self.connection_test_text.set("连接成功：接口返回了符合约定的 JSON。测试未改变执行状态。" if result.get("available") else
+                self.connection_test_text.set("连接成功：接口返回了单字符分类0/1/2。测试未改变执行状态。" if result.get("available") else
                                               "连接测试未通过：" + str(result.get("reason", "请检查服务配置。"))[:500])
             elif item[0] == "tray":
                 self._tray_event(item[1])

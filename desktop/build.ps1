@@ -1,7 +1,7 @@
 param(
     [string]$Python = "python",
     [ValidatePattern('^\d+\.\d+(\.\d+)?$')]
-    [string]$Version = "0.1.4"
+    [string]$Version = "0.1.6"
 )
 $ErrorActionPreference = "Stop"
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))

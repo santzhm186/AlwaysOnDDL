@@ -261,6 +261,24 @@ class DesktopBoundaryTests(unittest.TestCase):
         self.assertNotIn("AI 审核未完成", self.app.observation_text.get())
         self.assertEqual(self.app.ai_completed_count, 1)
 
+    def test_neutral_classification_is_displayed_logged_and_reused(self):
+        self.begin()
+        self.app.ai = Mock()
+        observation = Observation(process="browser", title="team notification", semantic="neutral")
+        self.app.last_observation = observation
+        self.deliver_ai("neutral", "2 · 辅助/中立")
+        self.assertIn("辅助/中立", self.app.observation_text.get())
+        self.assertIn("不认定已回到主线", self.app.observation_text.get())
+        self.assertIn("2 辅助/中立", self.app.ai_status.get())
+        self.app._record_observation(observation, 1)
+        self.assertEqual(self.app.journal.entries[-1]["details"]["semantic"], "neutral")
+        self.assertIn("不清除已有档位", self.app.journal.entries[-1]["summary"])
+        with patch("ironwill.app.threading.Thread") as worker:
+            self.app._request_ai(observation)
+            worker.assert_not_called()
+        self.assertEqual(self.app.semantic_result[2], "neutral")
+        self.assertEqual(self.app.ai_api_count, 0)
+
     def test_stale_ai_result_cannot_explain_new_window_or_new_settings(self):
         self.begin()
         self.app.ai = Mock()
@@ -496,7 +514,7 @@ class DesktopBoundaryTests(unittest.TestCase):
         import io
         self.configure_key()
         self.app.apply_ai()
-        response = {"choices": [{"message": {"content": '{"verdict":"unknown","reason":"synthetic test"}'}}]}
+        response = {"choices": [{"message": {"content": "2"}}]}
         def immediate_thread(target, **_):
             return Mock(start=target)
         with patch("ironwill.app.threading.Thread", side_effect=immediate_thread), patch(
@@ -507,6 +525,7 @@ class DesktopBoundaryTests(unittest.TestCase):
         self.assertEqual([entry["event"] for entry in communication], ["ai_request", "ai_response"])
         self.assertEqual(communication[0]["details"]["purpose"], "虚拟连接测试")
         self.assertIn("ironwill-connection-test", str(communication[0]))
+        self.assertIn("单字符分类", self.app.connection_test_text.get())
         self.assertNotIn("SYNTHETIC-NOT-A-REAL-KEY", str(list(self.app.journal.entries)))
         self.sample_mock.assert_not_called()
 

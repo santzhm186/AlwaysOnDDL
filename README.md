@@ -1,4 +1,4 @@
-# IronWill · Windows 0.1.4 / Android 0.1.1  ---------"This tool launches psychological assaults on the user to break procrastination, distraction, and evasive behaviors."
+# IronWill · Windows 0.1.6 / Android 0.1.2  ---------"This tool launches psychological assaults on the user to break procrastination, distraction, and evasive behaviors."
 本工具尝试精神攻击用户，解决用户的拖延，分心，逃避等低效行为。
 
 
@@ -8,13 +8,15 @@
 
 [隐私说明](PRIVACY.md) · [安全报告](SECURITY.md) · [参与开发](CONTRIBUTING.md) · [开源前审查](docs/open_source_review.md)
 
+新版界面统一深色与青柠色：桌面突出当前主线、运行状态和 API / 缓存计数，规则与连接设置分成卡片；Android 同步整理首页、输入框与按钮。沿用现有数据目录，没有新增运行依赖。
+
 ## 安装包与文档
 
 | 内容 | 文件 |
 |---|---|
-| Windows 64 位新版程序 | `IronWill-Windows-0.1.4.exe` |
-| Android 9 及以上安装包 | `IronWill-Android-0.1.1.apk` |
-| 完整源码包 | `IronWill-Source-0.1.4.zip` |
+| Windows 64 位新版程序 | `IronWill-Windows-0.1.6.exe` |
+| Android 9 及以上安装包 | `IronWill-Android-0.1.2.apk` |
+| 完整源码包 | `IronWill-Source-0.1.6.zip` |
 | 双端开发技术文档 | [development.md](docs/development.md) |
 | 四个原文件逐项审查 | [source_review.md](docs/source_review.md) |
 | Android 实施细节 | [android_implementation.md](docs/android_implementation.md) |
@@ -25,7 +27,7 @@
 
 原型和私人配置不包含在本仓库。新程序不自动读取旧实例的个人内容；首次打开是空白设置。
 
-从旧版升级：先退出旧窗口，再打开0.1.4新版程序。默认继续使用`%LOCALAPPDATA%\IronWill`，目标、誓言、规则及周期快照无需重填；以前使用自定义`--data-dir`的用户继续使用同一目录。版本号显示在窗口标题中。若构建时旧固定入口被运行实例占用，版本文件仍可独立使用，固定入口保留旧内容且不列入本次校验；退出旧实例后可将新版复制替换为`IronWill.exe`。升级不自动开启监督或发送AI请求。
+从旧版升级：先退出旧窗口，再打开0.1.6新版程序。默认继续使用`%LOCALAPPDATA%\IronWill`，目标、誓言、规则及周期快照无需重填；以前使用自定义`--data-dir`的用户继续使用同一目录。版本号显示在窗口标题中。若构建时旧固定入口被运行实例占用，版本文件仍可独立使用，固定入口保留旧内容且不列入本次校验；退出旧实例后可将新版复制替换为`IronWill.exe`。升级不自动开启监督或发送AI请求。
 
 ## 快速开始
 
@@ -88,13 +90,19 @@ python -m venv .venv
 
 ## 可选 AI
 
+### 单字符分类（0.1.6）
+
+模型只回复`1`（核心相关）、`2`（辅助/中立或信息不足）或`0`（明确无关），显示说明由程序生成。`2`保持安静，也不清除已有档位；`0`仍只作语义提醒。请求使用`max_tokens=1`、`temperature=0`，移除JSON输出模式。DeepSeek官方地址自动加入`thinking: {"type":"disabled"}`，可填写`https://api.deepseek.com`与`deepseek-flash`，依据[官方API](https://api-docs.deepseek.com/api/create-chat-completion/)。其他兼容服务需支持单token非思考输出，不会收到DeepSeek专属参数。
+
+日志显示实际数字、固定分类说明、finish_reason及服务提供的输入/输出token用量。空回复、多字符、旧JSON、思考或中断回复均按审核失败处理，不自动扩大预算或追加请求。一个生成token不等于只付费一个token，也不保证几毫秒完成；输入与网络耗时仍存在。本轮用合成响应验证，未实连付费模型测延迟或准确率。
+
 ### 减少重复审核（0.1.3）
 
 “手机与AI”页新增“已审核窗口复用期限”，默认**本工作周期**，也可选择15/30/60分钟，点击应用AI设置后生效。同一目标下已审核的进程＋页面标题再次出现，直接复用结论，不启动网络请求；进程和关键词本地规则已有结论时仍优先跳过AI。标题只规范空白和大小写，保留数字、项目名和页面内容差异，不把某个网页的结论推广到整个浏览器。
 
 判断记忆最多512条，保存在`ai_judgments.json`，重开后继续同一个暂停周期可复用；新周期、目标、规则、服务地址、模型或提示版本变化不会沿用旧结论。结束周期按钮或“清空判断缓存”可清除记忆。缓存文件只保存身份摘要、周期、时间和结论/理由，不保存Key或窗口原文，但理由可能复述个人内容，仍是本地明文。
 
-新标题需稳定停留至少3秒才申请审核，自动请求至少间隔30秒，失败重试从30秒逐步退避到最多5分钟。有效的“信息不足”结论只短暂复用5分钟，网络失败不当作已完成判断。手动虚拟连接测试是显式请求，绕过这些缓存与自动限频。页面分别显示实际API请求数与窗口缓存复用次数；刷新页面、每秒采样和缓存访问都不增加API次数。清空日志不清空判断缓存，两者按钮分开。
+新标题需稳定停留至少3秒才申请审核，自动请求至少间隔30秒，失败退避从30秒逐步增加到最多5分钟。0.1.6的三个有效类别使用所选复用期限；旧unknown格式最多5分钟，网络失败不当作已完成判断。新协议版本自动隔离旧JSON结论，无需手动清理原配置。手动虚拟连接测试是显式请求，绕过这些缓存与自动限频。页面分别显示实际API请求数与窗口缓存复用次数；刷新页面、每秒采样和缓存访问都不增加API次数。清空日志不清空判断缓存，两者按钮分开。
 
 Windows 可填写兼容的聊天补全接口地址、模型名和密钥后启用。默认不开启。它只处理本地规则无法判断的灰区，发送当前主线、进程名、窗口标题，不发送你的处境、后果、誓言或完整历史。隐私词优先拦截；远程服务必须是 HTTPS，本机服务允许回环 HTTP。
 
@@ -135,6 +143,6 @@ python -m venv .venv
 
 Android 可用 Android SDK 与 JDK 直接构建，无需下载 Gradle 依赖。命令、签名说明与 SDK 要求见 [android/README.md](android/README.md)。源码包不包含开发签名私钥；本机现有私钥在 `android/build/ironwill-development.jks`，希望以后覆盖升级当前 APK 时应妥善保留。
 
-Windows 0.1.4完整137项测试和EXE隐藏自检通过，包含日志、缓存、托盘、凭据、许可资源和局域网连接上限；Android 0.1.1重新构建、GPL资源、开发签名及26项JVM断言通过。详细范围见[验证记录](docs/verification.md)。Android真机安装、厂商后台限制、实际通知及锁屏仍待验收。
+Windows 0.1.6完整149项测试和EXE隐藏自检通过，包含日志、缓存、托盘、凭据、许可资源和局域网连接上限；Android 0.1.2重新构建、GPL资源、开发签名及26项JVM断言通过。详细范围见[验证记录](docs/verification.md)。Android真机安装、厂商后台限制、实际通知及锁屏仍待验收。
 
 升级cryptography wheel时，在已安装该wheel的构建环境中，从仓库根目录执行`python tools/collect_dependency_licenses.py`重新收集SBOM对应crate许可；它只下载公开归档并核验哈希，不执行第三方源码或安装新运行库。公开发布前运行`python tools/audit_publication.py --history`并核对[开源审查](docs/open_source_review.md)。
