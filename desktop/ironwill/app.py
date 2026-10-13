@@ -605,7 +605,9 @@ class IronWillApp:
         self.review_status = tk.StringVar()
         ttk.Label(parent, textvariable=self.review_status, style="Muted.TLabel", wraplength=880).grid(row=22, column=0, sticky="w")
 
-    def clear_ai_memory(self) -> None:
+    def clear_ai_memory(self, prompt: bool = True) -> None:
+        if prompt and not messagebox.askyesno("清空判断缓存", "确定要清空已审核窗口的缓存吗？后续相同窗口将重新由 AI 审核。", parent=self.root):
+            return
         self.review_memory.clear()
         if self.ai:
             self.ai.clear_cache()
@@ -702,7 +704,7 @@ class IronWillApp:
         self.ai_generation += 1
         self.ai_pending = False
         self.last_tick = time.monotonic()
-        self.clear_ai_memory()
+        self.clear_ai_memory(prompt=False)
         self._handle(self.engine.start(identity["goal"], oath=identity["oath"],
                                        reality=identity["reality"], consequence=identity["consequence"]))
         self._save_state()
@@ -742,7 +744,7 @@ class IronWillApp:
         self.ai_generation += 1
         self.ai_pending = False
         self.semantic_result = None
-        self.clear_ai_memory()
+        self.clear_ai_memory(prompt=False)
         self._save_state()
         self.status_text.set("这个周期已结束。不会评价成果，也不会删除任何文件。")
         self._refresh_status()
@@ -1223,6 +1225,8 @@ class IronWillApp:
     def forget_saved_key(self) -> None:
         if self.demo:
             self.key_storage_text.set("安全体验不操作真实密钥文件。")
+            return
+        if not messagebox.askyesno("删除已保存 Key", "确定要删除本机保存的 API Key 吗？服务商账户中的 Key 不受影响。", parent=self.root):
             return
         try:
             self.key_store.delete()
