@@ -485,11 +485,21 @@ class IronWillApp:
             self.status_text.set("托盘不可用，主窗口保持可见；当前周期不受影响。")
 
     def _text(self, parent: tk.Misc, height: int = 3) -> tk.Text:
-        return tk.Text(parent, height=height, bg=FIELD, fg=FG, insertbackground=FG,
+        widget = tk.Text(parent, height=height, bg=FIELD, fg=FG, insertbackground=FG,
                        font=("Microsoft YaHei UI", 10),
                        selectbackground="#405631", selectforeground=FG, relief="flat", borderwidth=0,
                        highlightthickness=1, highlightbackground=LINE, highlightcolor=ACCENT,
                        padx=12, pady=11, spacing1=2, spacing3=3, wrap="word", undo=True)
+        def _focus_next(event):
+            event.widget.tk_focusNext().focus()
+            return "break"
+        def _focus_prev(event):
+            event.widget.tk_focusPrev().focus()
+            return "break"
+        widget.bind("<Tab>", _focus_next)
+        widget.bind("<Shift-Tab>", _focus_prev)
+        widget.bind("<ISO_Left_Tab>", _focus_prev)
+        return widget
 
     def _build_mission(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
