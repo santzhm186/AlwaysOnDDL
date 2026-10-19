@@ -27,6 +27,8 @@ from . import __version__
 from .credentials import CredentialError, KeyStore, endpoint_identity, environment_key, read_legacy_key, validate_key
 from .activity_log import ActivityLog
 from .review_memory import ReviewMemory, CACHE_MODES, review_identity
+from .goals import MAX_TODOS, new_todo, reference_goal, validate_todos
+from .checklist import FloatingChecklist, TodoListView
 
 
 BG = "#131716"
@@ -74,8 +76,9 @@ class ScrollFrame(ttk.Frame):
 
     def connect_wheel(self) -> None:
         def visit(widget):
-            if not isinstance(widget, (tk.Text, ttk.Entry, ttk.Combobox)):
+            if not isinstance(widget, (tk.Text, ttk.Entry, ttk.Combobox)) and not getattr(widget, "_page_wheel_bound", False):
                 widget.bind("<MouseWheel>", self._wheel, add="+")
+                widget._page_wheel_bound = True
             for child in widget.winfo_children():
                 visit(child)
         visit(self.body)
@@ -135,6 +138,9 @@ class IronWillApp:
         self.load_warning = ""
         self.policy = Policy()
         self.settings = self._load_settings()
+        self.todos = validate_todos(self.settings.get("todos", []))
+        self.floating = None
+        self.floating_start_id = None
         if not self.demo and self.policy_path.exists():
             try:
                 self.policy = load_policy(self.policy_path)
@@ -153,6 +159,9 @@ class IronWillApp:
         self.copy_buttons: dict[str, ttk.Button] = {}
         self._style()
         self._build()
+        self._sync_reference(persist=False)
+        # Hidden checks never create a visible desktop widget or write preferences.
+        self.floating_start_id = self.root.after_idle(self._auto_show_floating)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.after(100, self._poll)
         if self.load_warning:
@@ -168,16 +177,26 @@ class IronWillApp:
                 "consequence": "拖延会让这一轮目标继续停留在计划里。",
                 "oath": "我会对自己作出的决定负责。",
                 "signature": "",
+                "todos": [new_todo("整理本轮开发清单"), new_todo("完成一个可验证的小步骤")],
             }
         if not self.settings_path.exists():
             return {}
         try:
+            if self.settings_path.stat().st_size > 1024 * 1024:
+                raise ValueError("oversized settings")
             value = json.loads(self.settings_path.read_text(encoding="utf-8"))
             if not isinstance(value, dict):
                 raise ValueError("not an object")
             # Ignore unexpected fields, especially any accidentally retained secrets.
             allowed = {"goal", "reality", "consequence", "oath", "signature", "ai_endpoint", "ai_model", "ai_cache_mode"}
-            return {key: item for key, item in value.items() if key in allowed and isinstance(item, str)}
+            settings = {key: item for key, item in value.items() if key in allowed and isinstance(item, str)}
+            settings["todos"] = validate_todos(value.get("todos", []))
+            if type(value.get("floating_enabled")) is bool:
+                settings["floating_enabled"] = value["floating_enabled"]
+            position = value.get("floating_position")
+            if isinstance(position, list) and len(position) == 2 and all(type(item) is int and abs(item) <= 100000 for item in position):
+                settings["floating_position"] = position
+            return settings
         except Exception:
             self.load_warning = "个人设置无法读取，原文件没有改动。请检查数据目录后再保存。"
             return {}
@@ -210,6 +229,7 @@ class IronWillApp:
         style.map("TButton", background=[("disabled", "#202722"), ("pressed", "#3d4b40"), ("active", "#354239")],
                   foreground=[("disabled", "#829087")])
         style.configure("Primary.TButton", background=ACCENT, foreground=BG, font=("Microsoft YaHei UI", 10, "bold"))
+        style.configure("Small.TButton", padding=(8, 4), font=("Microsoft YaHei UI", 9))
         style.map("Primary.TButton", background=[("disabled", "#323d27"), ("pressed", "#bbd45a"), ("active", "#e4fa92")],
                   foreground=[("disabled", "#9aa58f"), ("!disabled", BG)])
         style.configure("TEntry", fieldbackground=FIELD, foreground=FG, insertcolor=FG, padding=(10, 9), borderwidth=1,
@@ -283,6 +303,7 @@ class IronWillApp:
         notebook.enable_traversal()
         self.notebook = notebook
         mission, rules, connections = ScrollFrame(notebook), ScrollFrame(notebook), ScrollFrame(notebook)
+        self.mission_scroll = mission
         notebook.add(mission, text="当前周期")
         notebook.add(rules, text="判定规则")
         notebook.add(connections, text="手机与 AI")
@@ -494,9 +515,9 @@ class IronWillApp:
     def _build_mission(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
         ttk.Label(parent, text="把决定，变成行动。", style="Page.TLabel").grid(row=0, column=0, sticky="w")
-        self._copy(parent, "只专注于这一轮。写下主线，准备好时开始。").grid(row=1, column=0, sticky="ew", pady=(5, 16))
+        self._copy(parent, "长期目标指方向，短期待办落到这一轮的行动。").grid(row=1, column=0, sticky="ew", pady=(5, 10))
         actions = ttk.Frame(parent)
-        actions.grid(row=2, column=0, sticky="ew", pady=(0, 18))
+        actions.grid(row=2, column=0, sticky="ew", pady=(0, 12))
         self.start_button = ttk.Button(actions, text="开始周期  →", style="Primary.TButton", command=self.start)
         self.start_button.pack(side="left")
         self.pause_button = ttk.Button(actions, text="暂停", command=self.pause_resume)
@@ -504,29 +525,56 @@ class IronWillApp:
         self.end_button = ttk.Button(actions, text="结束周期", command=self.end)
         self.end_button.pack(side="left")
         ttk.Button(actions, text="体验提醒", command=self.preview_reminder).pack(side="right")
-        metrics = self._card(parent, (18, 12))
-        metrics.grid(row=3, column=0, sticky="ew", pady=(0, 14))
+        metrics = self._card(parent, (18, 10))
+        metrics.grid(row=3, column=0, sticky="ew", pady=(0, 12))
         self.api_metric = tk.StringVar(value="0 次")
         self.cache_metric = tk.StringVar(value="0 次")
         for column, (title, value) in enumerate((("当前状态", self.state_text), ("本次 API 请求", self.api_metric), ("窗口结论复用", self.cache_metric))):
             metrics.columnconfigure(column, weight=1, uniform="metrics")
             cell = ttk.Frame(metrics)
             cell.grid(row=0, column=column, sticky="ew", padx=(0, 12))
-            ttk.Label(cell, text=title, style="Muted.TLabel").pack(anchor="w")
-            ttk.Label(cell, textvariable=value, style="Metric.TLabel").pack(anchor="w", pady=(4, 0))
-        main = self._card(parent)
-        main.grid(row=4, column=0, sticky="ew", pady=(0, 14))
+            ttk.Label(cell, text=title, style="Muted.TLabel").pack(side="left")
+            ttk.Label(cell, textvariable=value, style="Heading.TLabel").pack(side="left", padx=(10, 0))
+        goals = ttk.Frame(parent)
+        goals.grid(row=4, column=0, sticky="ew", pady=(0, 14))
+        goals.columnconfigure(0, weight=2, uniform="goal_columns")
+        goals.columnconfigure(1, weight=3, uniform="goal_columns")
+        main = self._card(goals)
+        main.grid(row=0, column=0, sticky="nsew", padx=(0, 7))
         top = ttk.Frame(main)
         top.pack(fill="x", pady=(0, 12))
-        ttk.Label(top, text="01  /  当前主线", style="Heading.TLabel").pack(side="left")
-        ttk.Button(top, text="保存本页", command=self.save_identity).pack(side="right")
-        goal = self._text(main, 2)
-        goal.configure(font=("Microsoft YaHei UI", 13))
-        goal.pack(fill="x")
+        ttk.Label(top, text="01  /  长期目标", style="Heading.TLabel").pack(side="left")
+        ttk.Button(top, text="保存本页", style="Small.TButton", command=self.save_identity).pack(side="right")
+        goal = self._text(main, 4)
+        goal.configure(font=("Microsoft YaHei UI", 12), width=20)
+        goal.pack(fill="both", expand=True)
         goal.insert("1.0", self.settings.get("goal", ""))
         self.text_fields["goal"] = goal
+        self._copy(main, "未完成待办全部勾完后，AI 才参照这个长期方向。").pack(fill="x", pady=(10, 0))
+        tasks = self._card(goals)
+        tasks.grid(row=0, column=1, sticky="nsew", padx=(7, 0))
+        task_header = ttk.Frame(tasks)
+        task_header.pack(fill="x")
+        ttk.Label(task_header, text="02  /  短期目标 · Todo", style="Heading.TLabel").pack(side="left")
+        self.floating_enabled = tk.BooleanVar(value=self.settings.get("floating_enabled", not self.demo))
+        ttk.Checkbutton(task_header, text="桌面悬浮图标", variable=self.floating_enabled,
+                        command=self._toggle_floating).pack(side="right")
+        self.todo_progress = tk.StringVar()
+        ttk.Label(tasks, textvariable=self.todo_progress, style="Accent.TLabel").pack(anchor="w", pady=(9, 6))
+        self.todo_view = TodoListView(tasks, self.toggle_todo, self.edit_todo, self.remove_todo)
+        self.todo_view.pack(fill="x")
+        self._copy(tasks, "每行一项，Ctrl+Enter 添加。勾选、取消勾选和编辑即时保存，不会自动结束周期。").pack(fill="x", pady=(10, 8))
+        add_row = ttk.Frame(tasks)
+        add_row.pack(fill="x")
+        self.todo_input = self._text(add_row, 2)
+        self.todo_input.configure(width=16)
+        self.todo_input.pack(side="left", fill="x", expand=True)
+        self.todo_input.bind("<Control-Return>", lambda _event: (self.add_todos(), "break")[1])
+        ttk.Button(add_row, text="添加待办", command=self.add_todos).pack(side="right", padx=(10, 0))
+        self.goal_reference_text = tk.StringVar()
+        self._copy(tasks, textvariable=self.goal_reference_text).pack(fill="x", pady=(12, 0))
         pair = ttk.Frame(parent)
-        pair.grid(row=5, column=0, sticky="ew", pady=(0, 14))
+        pair.grid(row=6, column=0, sticky="ew", pady=(0, 14))
         pair.columnconfigure(0, weight=1, uniform="reasons")
         pair.columnconfigure(1, weight=1, uniform="reasons")
         for column, (key, title) in enumerate((("reality", "现实 · 你自己的原话"), ("consequence", "后果 · 你自己的原话"))):
@@ -539,8 +587,8 @@ class IronWillApp:
             widget.insert("1.0", self.settings.get(key, ""))
             self.text_fields[key] = widget
         promise = self._card(parent)
-        promise.grid(row=6, column=0, sticky="ew", pady=(0, 14))
-        ttk.Label(promise, text="02  /  大愿与署名", style="Heading.TLabel").pack(anchor="w")
+        promise.grid(row=7, column=0, sticky="ew", pady=(0, 14))
+        ttk.Label(promise, text="03  /  大愿与署名", style="Heading.TLabel").pack(anchor="w")
         self._copy(promise, "关于你要成为谁的标准，保留你自己的原话。").pack(fill="x", pady=(5, 12))
         oath = self._text(promise, 2)
         oath.pack(fill="x")
@@ -552,11 +600,12 @@ class IronWillApp:
         self.signature = tk.StringVar(value=self.settings.get("signature", ""))
         ttk.Entry(sigrow, textvariable=self.signature, width=24).pack(side="left", padx=10)
         diagnosis = self._card(parent)
-        diagnosis.grid(row=7, column=0, sticky="ew", pady=(0, 14))
-        ttk.Label(diagnosis, text="03  /  当前判断", style="Heading.TLabel").pack(anchor="w", pady=(0, 9))
+        diagnosis.grid(row=8, column=0, sticky="ew", pady=(0, 14))
+        ttk.Label(diagnosis, text="04  /  当前判断", style="Heading.TLabel").pack(anchor="w", pady=(0, 9))
         self.observation_text = tk.StringVar(value="尚未开始采样。")
         self._copy(diagnosis, textvariable=self.observation_text).pack(fill="x")
-        self._copy(parent, "没有固定钟点。开始、暂停、继续和结束都由你决定；重新打开软件不会自动接续监督。体验提醒不升档，不记录惩罚。").grid(row=8, column=0, sticky="ew")
+        self._copy(parent, "没有固定钟点。开始、暂停、继续和结束都由你决定；重新打开软件不会自动接续监督。体验提醒不升档，不记录惩罚。").grid(row=9, column=0, sticky="ew")
+        self._refresh_todos()
 
     def _build_rules(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
@@ -644,7 +693,7 @@ class IronWillApp:
         parent.columnconfigure(0, weight=1)
         ttk.Label(parent, text="AI 灰区判断 · 可留空，离线也可监督", style="Heading.TLabel").grid(row=8, column=0, sticky="w")
         self._copy(parent, "AI 只判断与当前主线的相关性。它不会评价成果、决定升档或执行锁屏。\n"
-                  "启用后，仅发送当前目标、进程名和必要的窗口标题。现实、后果、大愿和署名不发给模型。\n"
+                  "启用后，仅发送当前参考目标、进程名和必要的窗口标题。有未完成待办时只用待办，全部完成才用已保存的长期目标；现实、后果、大愿和署名不发给模型。\n"
                   "单字符分类：1 核心相关 / 2 辅助或中立 / 0 明确无关。请求最多 1 个输出 token；官方 DeepSeek 自动关闭思考。显示说明由本机生成。").grid(row=9, column=0, sticky="ew", pady=(6, 12))
         ai_form = ttk.Frame(parent)
         ai_form.grid(row=10, column=0, sticky="ew")
@@ -709,11 +758,177 @@ class IronWillApp:
         values["signature"] = self.signature.get()
         return values
 
-    def save_identity(self) -> bool:
-        self.settings.update(self._identity())
+    def _commit_settings(self, changes) -> bool:
+        previous = self.settings
+        self.settings = {**previous, **changes}
         if not self._persist_settings():
+            self.settings = previous
             return False
-        suffix = "当前周期仍沿用开始时的目标和大愿；结束后重新开始可采用新内容。" if self.engine.state.get("status") in {"active", "paused"} else ""
+        return True
+
+    def _refresh_todos(self) -> None:
+        done = sum(item["done"] for item in self.todos)
+        pending = len(self.todos) - done
+        self.todo_progress.set(f"已完成 {done} / {len(self.todos)} · 剩余 {pending} 项")
+        self.todo_view.set_items(self.todos)
+        if pending:
+            text = f"AI 参考：{pending} 项未完成待办，暂不使用长期目标。长清单会按每项摘要分配输入长度。"
+        elif self.settings.get("goal", "").strip():
+            text = "AI 参考：长期目标。当前没有未完成待办，勾选不会自动结束周期。"
+        else:
+            text = "当前没有未完成待办；请填写并保存长期目标，或添加下一项。无参考目标时不发 AI 请求。"
+        self.goal_reference_text.set(text)
+        self.mission_scroll.connect_wheel()
+        if self.floating:
+            self.floating.set_items(self.todos)
+
+    def _commit_todos(self, items) -> bool:
+        try:
+            clean = validate_todos(items)
+        except ValueError as error:
+            self.status_text.set(str(error))
+            return False
+        if not self._commit_settings({"todos": clean}):
+            self._refresh_todos()  # Roll back a clicked checkbox on storage failure.
+            return False
+        self.todos = clean
+        self._refresh_todos()
+        self._sync_reference()
+        self._log("程序", "todo_updated", "短期待办已更新，完成状态由用户确认",
+                  {"total": len(clean), "done": sum(item["done"] for item in clean)})
+        self.status_text.set(self.persistence_warning or ("待办已保存。" if not self.demo else "体验清单已更新，仅保存在内存。"))
+        return True
+
+    def add_todos(self) -> bool:
+        lines = [line.strip() for line in self.todo_input.get("1.0", "end-1c").splitlines() if line.strip()]
+        if not lines:
+            self.status_text.set("先在输入框每行写一项短期目标。")
+            return False
+        try:
+            if len(self.todos) + len(lines) > MAX_TODOS:
+                raise ValueError(f"待办列表最多 {MAX_TODOS} 项，可先移除不需要保留的记录。")
+            added = [new_todo(line) for line in lines]
+        except ValueError as error:
+            self.status_text.set(str(error))
+            return False
+        if not self._commit_todos(self.todos + added):
+            return False
+        self.todo_input.delete("1.0", "end")
+        return True
+
+    def toggle_todo(self, identifier: str, done: bool) -> bool:
+        if type(done) is not bool or not any(item["id"] == identifier for item in self.todos):
+            return False
+        return self._commit_todos([{**item, "done": done} if item["id"] == identifier else dict(item)
+                                   for item in self.todos])
+
+    def update_todo_text(self, identifier: str, text: str) -> bool:
+        try:
+            cleaned = new_todo(text)["text"]
+        except ValueError as error:
+            self.status_text.set(str(error))
+            return False
+        if not any(item["id"] == identifier for item in self.todos):
+            self.status_text.set("这项待办已被移除。")
+            return False
+        return self._commit_todos([{**item, "text": cleaned} if item["id"] == identifier else dict(item)
+                                   for item in self.todos])
+
+    def edit_todo(self, identifier: str):
+        item = next((item for item in self.todos if item["id"] == identifier), None)
+        if item is None:
+            return
+        window = tk.Toplevel(self.root)
+        window.title("编辑短期待办")
+        window.geometry("540x280")
+        window.minsize(380, 240)
+        body = ttk.Frame(window, padding=18)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="保留一项明确的待办", style="Heading.TLabel").pack(anchor="w")
+        buttons = ttk.Frame(body)
+        buttons.pack(side="bottom", fill="x", pady=(12, 0))
+        field = self._text(body, 4)
+        field.insert("1.0", item["text"])
+        field.pack(fill="both", expand=True, pady=(12, 0))
+        def save():
+            if self.update_todo_text(identifier, field.get("1.0", "end-1c")):
+                window.destroy()
+        ttk.Button(buttons, text="保存", style="Primary.TButton", command=save).pack(side="right")
+        ttk.Button(buttons, text="取消", command=window.destroy).pack(side="right", padx=8)
+        field.focus_set()
+        window.bind("<Escape>", lambda _event: window.destroy())
+        return window
+
+    def remove_todo(self, identifier: str) -> bool:
+        item = next((item for item in self.todos if item["id"] == identifier), None)
+        if item is None or not messagebox.askyesno("移除待办", "移除这项待办及其完成标记？\n\n" + item["text"][:100], parent=self.root):
+            return False
+        return self._commit_todos([dict(item) for item in self.todos if item["id"] != identifier])
+
+    def _sync_reference(self, persist=True) -> None:
+        if self.engine.state.get("status") not in {"active", "paused"}:
+            return
+        reference = reference_goal(self.settings.get("goal", ""), self.todos)
+        if reference == self.engine.state.get("goal"):
+            return
+        self.engine.state["goal"] = reference
+        self.engine.state["recovery_seconds"] = 0.0
+        self.engine._discard_next_tick = True
+        self.ai_generation += 1
+        self.ai_pending = False
+        self.ai_candidate = None
+        self.ai_wait_reason = "目标已更新，等待当前窗口重新审核。" if reference else "没有未完成待办或长期目标，暂不请求 AI。"
+        self.semantic_result = self.last_ai_details = None
+        if self.dialog_advisory:
+            self._close_reminder()
+        if persist:
+            self._save_state()
+        self._refresh_status()
+
+    def _auto_show_floating(self) -> None:
+        self.floating_start_id = None
+        if not self.closing and self.root.state() != "withdrawn" and self.floating_enabled.get():
+            self._show_floating()
+
+    def _show_floating(self) -> None:
+        if self.closing:
+            return
+        if self.floating is None:
+            self.floating = FloatingChecklist(self.root, self.toggle_todo, self.open_mission,
+                self.hide_floating, self._floating_moved, self.settings.get("floating_position"))
+        self.floating.set_items(self.todos)
+        self.floating.show()
+
+    def _toggle_floating(self) -> None:
+        visible = bool(self.floating_enabled.get())
+        if not self._commit_settings({"floating_enabled": visible}):
+            self.floating_enabled.set(self.settings.get("floating_enabled", not self.demo))
+            return
+        if visible:
+            self._show_floating()
+        elif self.floating:
+            self.floating.close()
+
+    def hide_floating(self) -> None:
+        self.floating_enabled.set(False)
+        self._toggle_floating()
+
+    def _floating_moved(self, position) -> None:
+        self._commit_settings({"floating_position": list(position)})
+
+    def open_mission(self) -> None:
+        if self.floating:
+            self.floating.hide_popup()
+        self.restore_window()
+        self.notebook.select(0)
+        self.mission_scroll.canvas.yview_moveto(0)
+
+    def save_identity(self) -> bool:
+        if not self._commit_settings({**self._identity(), "todos": self.todos}):
+            return False
+        self._refresh_todos()
+        self._sync_reference()
+        suffix = "参考目标已更新；现实、后果和大愿仍沿用开始时的原文。" if self.engine.state.get("status") in {"active", "paused"} else ""
         self.status_text.set(("体验内容已更新，仅保存在内存。" if self.demo else "已保存到本机。") + suffix)
         return True
 
@@ -773,10 +988,11 @@ class IronWillApp:
         if self.engine.state.get("status") in {"active", "paused"}:
             return
         identity = self._identity()
-        if not identity["goal"].strip():
+        reference = reference_goal(identity["goal"], self.todos)
+        if not reference:
             self.notebook.select(0)
             self.text_fields["goal"].focus_set()
-            self.status_text.set("先写下这一轮已经决定要做的事。")
+            self.status_text.set("先填写长期目标，或添加至少一项未完成的短期待办。")
             return
         if not self.save_identity():
             return
@@ -789,7 +1005,7 @@ class IronWillApp:
         self.ai_pending = False
         self.last_tick = time.monotonic()
         self.clear_ai_memory(prompt=False)
-        self._handle(self.engine.start(identity["goal"], oath=identity["oath"],
+        self._handle(self.engine.start(reference, oath=identity["oath"],
                                        reality=identity["reality"], consequence=identity["consequence"]))
         self._save_state()
         if self.demo:
@@ -985,7 +1201,7 @@ class IronWillApp:
         if preview:
             ttk.Button(title_row, text="看第三档", command=lambda: self._show_reminder(3, "你写下的决定仍在这里。回到主线。", preview=True)).pack(side="right")
         line = message if message.strip() else ("这是第三次提醒。回到主线。" if stage >= 3 else "你已经决定了这一轮的主线。现在回去。")
-        goal = self._identity()["goal"] if preview else self.engine.state.get("goal", "")
+        goal = reference_goal(self._identity()["goal"], self.todos) if preview else self.engine.state.get("goal", "")
         body = self._text(content, 10)
         body.insert("1.0", line + "\n\n当前主线：\n" + str(goal))
         if preview and stage >= 3 and self._identity()["oath"]:
@@ -1157,6 +1373,8 @@ class IronWillApp:
             remaining = max(0.0, float(state["next_reminder_at"]) - float(state["drift_seconds"]))
             verdict = ("命中本地红线；已到第三档。" if state["stage"] >= 3 else
                        f"命中本地红线；距离下一档还需约 {math.ceil(remaining)} 秒有效偏离时间。")
+        elif not self.engine.state.get("goal", "").strip():
+            verdict = "没有未完成待办或已保存的长期目标，暂不请求 AI；本地规则仍按原设置运行。"
         elif not self.ai:
             verdict = "未命中本地规则；AI 尚未启用，没有标题审核结论。无需预填红线标题，启用 AI 后可审核这些窗口。"
         else:
@@ -1345,6 +1563,10 @@ class IronWillApp:
     def _request_ai(self, observation: Observation) -> None:
         now = time.monotonic()
         if not self.ai:
+            return
+        if not self.engine.state.get("goal", "").strip():
+            self.ai_wait_reason = "没有未完成待办或长期目标，暂不请求 AI。"
+            self.ai_candidate = None
             return
         if (observation.status != "ok" or observation.locked or observation.idle_seconds is None
                 or not isinstance(observation.idle_seconds, (int, float))
@@ -1626,6 +1848,11 @@ class IronWillApp:
         if not messagebox.askyesno("停止并退出", "关闭 IronWill 将停止本机监督和手机配对服务。未保存的编辑会丢失。\n\n现在停止并退出？", parent=self.root):
             return
         self.closing = True
+        if self.floating_start_id:
+            self.root.after_cancel(self.floating_start_id)
+            self.floating_start_id = None
+        if self.floating:
+            self.floating.close()
         if self.timer_id:
             self.root.after_cancel(self.timer_id)
         if self.engine.state.get("status") in {"active", "paused"}:
@@ -1689,7 +1916,8 @@ def smoke_test() -> dict[str, Any]:
             app._log("程序", "self_check", "安全体验日志（仅内存）")
             app._refresh_logs()
             assert len(app.log_tree.get_children()) == 1, "Log page failed to render"
-            return {"ok": True, "pages": 4, "log_page": True, "identity_fields": len(app.text_fields),
+            assert len(app.todo_view.rows) == len(app.todos), "Todo list failed to render"
+            return {"ok": True, "pages": 4, "log_page": True, "todo_list": True, "identity_fields": len(app.text_fields),
                     "rule_lists": len(app.rule_fields), "preview_unchanged": before == after,
                     "monitoring": False, "network": False, "lock": False}
         finally:

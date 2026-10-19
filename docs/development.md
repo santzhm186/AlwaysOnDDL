@@ -1,6 +1,6 @@
 # IronWill 桌面端和 Android 开发技术文档
 
-版本：Windows 0.1.6 / Android 0.1.2。更新日期：2026年10月12日。目标：交付可以分别运行、可在可信局域网协同的 Windows 和 Android 首版，并给后续开发提供明确的接口、状态、迁移和验收约束。
+版本：Windows 0.1.7 / Android 0.1.2。更新日期：2026年10月13日。目标：交付可以分别运行、可在可信局域网协同的 Windows 和 Android 首版，并给后续开发提供明确的接口、状态、迁移和验收约束。
 
 0.1.5 / Android 0.1.2 界面更新：统一深色、暖白与青柠色，Windows重排主线卡片、运行计数、规则及连接设置，Android使用原生圆角卡片和输入焦点描边。没有新增依赖，数据格式与监督、权限、AI请求策略保持兼容。截图脚本只使用虚拟数据，可检查四页上下区域与最小尺寸提醒弹窗。
 
@@ -67,6 +67,8 @@ ironwill/
       activity_log.py          有界本地JSONL判断/通信日志及凭据屏蔽
       tray_windows.py          原生Windows托盘与独立消息循环
       review_memory.py         工作周期/时长判断记忆与有界原子保存
+      goals.py                 待办验证与未完成目标优先的参考文本
+      checklist.py             原生Tk清单视图、悬浮图标和弹出清单
       relay.py                 显式启用的局域网HTTPS接口
     tests/                     状态、AI、平台和同步测试
   android/
@@ -218,6 +220,10 @@ UI为AI请求附加周期ID和配置代次，回应时检查它们仍匹配；�
 ## 7 AI 灰区相关性
 
 ### 7.1 输入和输出
+
+Windows 0.1.7参考目标来自goals.reference_goal：只取未完成todos，全部完成或为空时才取ui_settings.goal（长期目标）。待办与完成标记不进Engine的结果评分；Engine.goal只是当前派生参考文本。每项文本在4000字符总预算内公平分配，完整列表只存本机设置。todo操作及保存长期目标成功后才更新参考，失败回滚；参考改变时增加ai_generation、清除semantic_result/last_ai_details/候选窗口、重置连续恢复与下一次采样基线，保留stage/drift/id/status。旧回包不能用于新目标，review_identity已有goal摘要负责缓存隔离；限频不被勾选动作重置。全完成且长期目标空白时不请求AI，用户仍自行结束周期。
+
+长期goal及todos在同一ui_settings.json以唯一临时文件原子保存；扩展字段仅接受严格list[{id:32位hex,text:1..500字符,done:bool}]，最多100项。floating_enabled为bool、floating_position为两个整数；1MiB读取上限。无todos的旧配置保持长期goal不变且不在启动时写回，损坏清单给出加载警告，不自动改原文件。FloatingChecklist与TodoListView通过同一app回调更新，Tk线程串行保存，失败时BooleanVar复原；无独立第二份Todo状态文件，也不向Android同步待办ID/完成标记。手机现有导入只取得派生参考目标。
 
 AI是可选能力。未配置模型、用户未开启、网络不可用时，基础规则和固定提醒仍工作。仅灰区才发送当前目标、进程标识和必要标题；处境、后果、誓言、署名、历史台账不在这条请求中。
 

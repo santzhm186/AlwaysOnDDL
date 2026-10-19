@@ -2,4 +2,4 @@
 # SPDX-License-Identifier: GPL-3.0-only
 """IronWill desktop package. Importing the package never starts monitoring."""
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"
