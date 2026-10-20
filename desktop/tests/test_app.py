@@ -343,6 +343,7 @@ class DesktopBoundaryTests(unittest.TestCase):
         self.app.ai_model.set("test-model")
         self.app.ai_key.set(key)
 
+    @unittest.skipIf(os.name != "nt", "DPAPI requires Windows")
     def test_remembered_key_is_encrypted_and_reused_on_reopen(self):
         self.configure_key()
         self.app.remember_api_key.set(True)
@@ -367,6 +368,7 @@ class DesktopBoundaryTests(unittest.TestCase):
         self.assertEqual(reopened.ai._key, "SYNTHETIC-NOT-A-REAL-KEY")
         self.assertEqual(reopened.engine.state["status"], "idle")
 
+    @unittest.skipIf(os.name != "nt", "DPAPI requires Windows")
     def test_saved_key_cannot_be_used_for_edited_endpoint(self):
         self.configure_key()
         self.app.remember_api_key.set(True)
@@ -377,6 +379,7 @@ class DesktopBoundaryTests(unittest.TestCase):
         self.assertIn("未找到这个服务", self.app.ai_status.get())
         self.assertTrue(self.app.key_store.exists())
 
+    @unittest.skipIf(os.name != "nt", "DPAPI requires Windows")
     def test_existing_runtime_key_can_be_remembered_without_reentering(self):
         self.configure_key()
         self.app.apply_ai()
@@ -420,6 +423,7 @@ class DesktopBoundaryTests(unittest.TestCase):
         self.assertFalse(self.app.ai_enabled.get())
         self.assertGreater(self.app.ai_generation, previous_generation)
 
+    @unittest.skipIf(os.name != "nt", "DPAPI requires Windows")
     def test_cancelling_forget_keeps_saved_and_runtime_key(self):
         self.configure_key()
         self.app.remember_api_key.set(True)
@@ -433,6 +437,7 @@ class DesktopBoundaryTests(unittest.TestCase):
         self.assertIsNotNone(self.app.runtime_key)
         self.assertEqual(self.app.ai_generation, generation)
 
+    @unittest.skipIf(os.name != "nt", "DPAPI requires Windows")
     def test_unchecking_remember_removes_disk_copy_but_keeps_current_session(self):
         self.configure_key()
         self.app.remember_api_key.set(True)
