@@ -1,4 +1,4 @@
-# IronWill · Windows 0.1.7 / Android 0.1.2  ---------"This tool launches psychological assaults on the user to break procrastination, distraction, and evasive behaviors."
+# IronWill · Windows 0.1.8 / Android 0.1.2  ---------"This tool launches psychological assaults on the user to break procrastination, distraction, and evasive behaviors."
 本工具尝试精神攻击用户，解决用户的拖延，分心，逃避等低效行为。
 
 
@@ -14,11 +14,15 @@ Windows 0.1.7把周期页拆成长期目标与短期Todo。短期待办每行一
 
 ## 安装包与文档
 
+0.1.8修复四项可靠性问题：损坏配置保留可读取内容并进入只读保护；按数据目录限制多开，保存时另做文件锁与摘要冲突检测；配置读写统一限制为1MiB的UTF-8内容；目标变化后更新延迟和当前提醒文案，不重置周期或档位。
+
+配置只读时仍可在本次运行中移动/隐藏悬浮图标，但不保存偏好或恢复监督；请先修复/恢复ui_settings.json后重新打开。若提示配置被外部修改，本次保存不会覆盖它，请先保留编辑再退出重开。升级前须退出0.1.7及更早版本，它们不参与新锁。锁文件残留不代表程序还在运行，系统在进程退出后释放锁，无需删除文件。
+
 | 内容 | 文件 |
 |---|---|
-| Windows 64 位新版程序 | `IronWill-Windows-0.1.7.exe` |
+| Windows 64 位新版程序 | `IronWill-Windows-0.1.8.exe` |
 | Android 9 及以上安装包 | `IronWill-Android-0.1.2.apk` |
-| 完整源码包 | `IronWill-Source-0.1.7.zip` |
+| 完整源码包 | `IronWill-Source-0.1.8.zip` |
 | 双端开发技术文档 | [development.md](docs/development.md) |
 | 四个原文件逐项审查 | [source_review.md](docs/source_review.md) |
 | Android 实施细节 | [android_implementation.md](docs/android_implementation.md) |
@@ -29,7 +33,7 @@ Windows 0.1.7把周期页拆成长期目标与短期Todo。短期待办每行一
 
 原型和私人配置不包含在本仓库。新程序不自动读取旧实例的个人内容；首次打开是空白设置。
 
-从旧版升级：先退出旧窗口，再打开0.1.7新版程序。默认继续使用`%LOCALAPPDATA%\IronWill`，目标、誓言、规则及周期快照无需重填；以前使用自定义`--data-dir`的用户继续使用同一目录。版本号显示在窗口标题中。若构建时旧固定入口被运行实例占用，版本文件仍可独立使用，固定入口保留旧内容且不列入本次校验；退出旧实例后可将新版复制替换为`IronWill.exe`。升级不自动开启监督或发送AI请求。
+从旧版升级：先退出旧窗口，再打开0.1.8新版程序。默认继续使用`%LOCALAPPDATA%\IronWill`，目标、誓言、规则及周期快照无需重填；以前使用自定义`--data-dir`的用户继续使用同一目录。版本号显示在窗口标题中。若构建时旧固定入口被运行实例占用，版本文件仍可独立使用，固定入口保留旧内容且不列入本次校验；退出旧实例后可将新版复制替换为`IronWill.exe`。升级不自动开启监督或发送AI请求。
 
 ## 快速开始
 
@@ -145,6 +149,6 @@ python -m venv .venv
 
 Android 可用 Android SDK 与 JDK 直接构建，无需下载 Gradle 依赖。命令、签名说明与 SDK 要求见 [android/README.md](android/README.md)。源码包不包含开发签名私钥；本机现有私钥在 `android/build/ironwill-development.jks`，希望以后覆盖升级当前 APK 时应妥善保留。
 
-Windows 0.1.7完整177项测试和EXE隐藏自检通过，包含日志、缓存、托盘、凭据、许可资源和局域网连接上限；Android 0.1.2重新构建、GPL资源、开发签名及26项JVM断言通过。详细范围见[验证记录](docs/verification.md)。Android真机安装、厂商后台限制、实际通知及锁屏仍待验收。
+Windows 0.1.8完整206项测试和EXE隐藏自检通过，包含日志、缓存、托盘、凭据、许可资源和局域网连接上限；Android 0.1.2重新构建、GPL资源、开发签名及26项JVM断言通过。详细范围见[验证记录](docs/verification.md)。Android真机安装、厂商后台限制、实际通知及锁屏仍待验收。
 
 升级cryptography wheel时，在已安装该wheel的构建环境中，从仓库根目录执行`python tools/collect_dependency_licenses.py`重新收集SBOM对应crate许可；它只下载公开归档并核验哈希，不执行第三方源码或安装新运行库。公开发布前运行`python tools/audit_publication.py --history`并核对[开源审查](docs/open_source_review.md)。

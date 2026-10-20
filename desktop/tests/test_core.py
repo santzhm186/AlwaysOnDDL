@@ -226,6 +226,26 @@ class CoreTests(unittest.TestCase):
                 save_snapshot(path, bad)
             self.assertEqual(path.read_text(encoding="utf-8"), "not-json")
 
+    def test_reference_update_preserves_cycle_stage_drift_and_choice(self):
+        self.advance(40)
+        self.engine.state.update(recovery_seconds=20, last_choice="BACK")
+        before = self.engine.snapshot()
+        self.assertTrue(self.engine.update_reference("new reference"))
+        after = self.engine.snapshot()
+        self.assertEqual(after, {**before, "goal": "new reference", "recovery_seconds": 0.0})
+        self.assertTrue(self.engine._discard_next_tick)
+        self.assertFalse(self.engine.update_reference("new reference"))
+
+    def test_render_current_reminder_is_read_only_and_validates_stage(self):
+        self.engine.update_reference("new reference")
+        before = self.engine.snapshot()
+        self.assertIn("new reference", self.engine.reminder_message(1))
+        self.assertIn("new reference", self.engine.reminder_message(2))
+        self.assertEqual(self.engine.snapshot(), before)
+        for stage in (0, 4, True, "1"):
+            with self.assertRaises(ValueError):
+                self.engine.reminder_message(stage)
+
     def test_incomplete_snapshot_is_rejected(self):
         with self.assertRaises(ValueError):
             Engine(snapshot={"schema_version": 1})

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import queue
 import tempfile
 import threading
@@ -29,6 +28,8 @@ from .activity_log import ActivityLog
 from .review_memory import ReviewMemory, CACHE_MODES, review_identity
 from .goals import MAX_TODOS, new_todo, reference_goal, validate_todos
 from .checklist import FloatingChecklist, TodoListView
+from .directory_lock import DirectoryBusyError, DirectoryLock
+from .settings_store import SettingsError, SettingsStore, atomic_write_settings as _write_json
 
 
 BG = "#131716"
@@ -39,21 +40,6 @@ MUTED = "#a8b4aa"
 ACCENT = "#d7f06c"
 WARN = "#edbc7a"
 LINE = "#354139"
-
-
-def _write_json(path: Path, value: dict[str, Any]) -> None:
-    """Unique same-directory temporary file; never write secrets here."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(value, stream, ensure_ascii=False, indent=2)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
 
 
 class ScrollFrame(ttk.Frame):
@@ -92,6 +78,7 @@ class IronWillApp:
         self.root, self.data_dir, self.demo = root, Path(data_dir), demo
         self.policy_path = self.data_dir / "policy.json"
         self.settings_path = self.data_dir / "ui_settings.json"
+        self.settings_store = SettingsStore(self.settings_path)
         self.snapshot_path = self.data_dir / "session.json"
         self.key_store = KeyStore(self.data_dir)
         self.runtime_key: tuple[str, str] | None = None
@@ -115,6 +102,7 @@ class IronWillApp:
         self.last_tick = time.monotonic()
         self.last_saved = 0.0
         self.dialog: tk.Toplevel | None = None
+        self.dialog_body: tk.Text | None = None
         self.dialog_stage = 0
         self.dialog_preview = False
         self.dialog_advisory = False
@@ -134,6 +122,7 @@ class IronWillApp:
         self.relay_info: dict[str, Any] = {}
         self.relay_reminder: dict[str, Any] | None = None
         self.pending_reminder: dict[str, Any] | None = None
+        self.reference_revision = 0
         self.persistence_warning = ""
         self.load_warning = ""
         self.policy = Policy()
@@ -179,27 +168,9 @@ class IronWillApp:
                 "signature": "",
                 "todos": [new_todo("整理本轮开发清单"), new_todo("完成一个可验证的小步骤")],
             }
-        if not self.settings_path.exists():
-            return {}
-        try:
-            if self.settings_path.stat().st_size > 1024 * 1024:
-                raise ValueError("oversized settings")
-            value = json.loads(self.settings_path.read_text(encoding="utf-8"))
-            if not isinstance(value, dict):
-                raise ValueError("not an object")
-            # Ignore unexpected fields, especially any accidentally retained secrets.
-            allowed = {"goal", "reality", "consequence", "oath", "signature", "ai_endpoint", "ai_model", "ai_cache_mode"}
-            settings = {key: item for key, item in value.items() if key in allowed and isinstance(item, str)}
-            settings["todos"] = validate_todos(value.get("todos", []))
-            if type(value.get("floating_enabled")) is bool:
-                settings["floating_enabled"] = value["floating_enabled"]
-            position = value.get("floating_position")
-            if isinstance(position, list) and len(position) == 2 and all(type(item) is int and abs(item) <= 100000 for item in position):
-                settings["floating_position"] = position
-            return settings
-        except Exception:
-            self.load_warning = "个人设置无法读取，原文件没有改动。请检查数据目录后再保存。"
-            return {}
+        settings = self.settings_store.load()
+        self.load_warning = self.settings_store.warning
+        return settings
 
     def _style(self) -> None:
         self.root.title("IronWill · 桌面 " + __version__ + (" · 安全体验" if self.demo else ""))
@@ -771,7 +742,9 @@ class IronWillApp:
         pending = len(self.todos) - done
         self.todo_progress.set(f"已完成 {done} / {len(self.todos)} · 剩余 {pending} 项")
         self.todo_view.set_items(self.todos)
-        if pending:
+        if self.settings_store.read_only:
+            text = "个人配置只读，暂不能确认清单完整性；修复配置并重新打开后再恢复监督。"
+        elif pending:
             text = f"AI 参考：{pending} 项未完成待办，暂不使用长期目标。长清单会按每项摘要分配输入长度。"
         elif self.settings.get("goal", "").strip():
             text = "AI 参考：长期目标。当前没有未完成待办，勾选不会自动结束周期。"
@@ -866,14 +839,14 @@ class IronWillApp:
         return self._commit_todos([dict(item) for item in self.todos if item["id"] != identifier])
 
     def _sync_reference(self, persist=True) -> None:
+        if self.settings_store.read_only:
+            return  # An unreadable list is not evidence that every task is complete.
         if self.engine.state.get("status") not in {"active", "paused"}:
             return
         reference = reference_goal(self.settings.get("goal", ""), self.todos)
-        if reference == self.engine.state.get("goal"):
+        if not self.engine.update_reference(reference):
             return
-        self.engine.state["goal"] = reference
-        self.engine.state["recovery_seconds"] = 0.0
-        self.engine._discard_next_tick = True
+        self.reference_revision += 1
         self.ai_generation += 1
         self.ai_pending = False
         self.ai_candidate = None
@@ -881,6 +854,12 @@ class IronWillApp:
         self.semantic_result = self.last_ai_details = None
         if self.dialog_advisory:
             self._close_reminder()
+        elif self.dialog and self.dialog.winfo_exists() and not self.dialog_preview and self.dialog_body:
+            # Refresh in place: changing a checklist must not raise another window.
+            self._set_reminder_body(self.engine.reminder_message(self.dialog_stage), reference)
+        if self.pending_reminder:
+            self.pending_reminder.update(message=self.engine.reminder_message(self.pending_reminder["stage"]),
+                                         reference_revision=self.reference_revision)
         if persist:
             self._save_state()
         self._refresh_status()
@@ -901,19 +880,22 @@ class IronWillApp:
 
     def _toggle_floating(self) -> None:
         visible = bool(self.floating_enabled.get())
-        if not self._commit_settings({"floating_enabled": visible}):
-            self.floating_enabled.set(self.settings.get("floating_enabled", not self.demo))
-            return
+        saved = False if self.settings_store.read_only else self._commit_settings({"floating_enabled": visible})
         if visible:
             self._show_floating()
         elif self.floating:
             self.floating.close()
+        if not saved:
+            self.status_text.set("悬浮图标偏好仅在本次运行生效；个人配置未保存。" + self.settings_store.warning)
 
     def hide_floating(self) -> None:
         self.floating_enabled.set(False)
         self._toggle_floating()
 
     def _floating_moved(self, position) -> None:
+        if self.settings_store.read_only:
+            self.status_text.set("位置仅在本次运行生效；" + self.settings_store.warning)
+            return
         self._commit_settings({"floating_position": list(position)})
 
     def open_mission(self) -> None:
@@ -936,8 +918,11 @@ class IronWillApp:
         if self.demo:
             return True
         try:
-            _write_json(self.settings_path, self.settings)
+            self.settings_store.save(self.settings, writer=_write_json)
             return True
+        except SettingsError as error:
+            messagebox.showerror("配置未保存", str(error), parent=self.root)
+            return False
         except Exception:
             messagebox.showerror("无法保存", "个人设置未能写入。请检查数据目录权限与磁盘空间。原文件不会被截断。", parent=self.root)
             return False
@@ -1020,6 +1005,9 @@ class IronWillApp:
 
     def pause_resume(self) -> None:
         state = self.engine.state.get("status")
+        if state == "paused" and self.settings_store.read_only:
+            self.status_text.set(self.settings_store.warning)
+            return
         if state == "active":
             self._handle(self.engine.pause())
             self._close_reminder()
@@ -1128,6 +1116,7 @@ class IronWillApp:
                 else:
                     self.pending_reminder = {"session_id": self.engine.state.get("id"), "stage": stage,
                                              "message": str(event.get("message", "")), "event_id": event_id,
+                                             "reference_revision": self.reference_revision,
                                              "retry_at": time.monotonic() + 30}
                     self.status_text.set("另一端刚显示过提醒；本机这次提醒将在短暂延后后显示。")
             elif kind == "lock_requested":
@@ -1168,6 +1157,9 @@ class IronWillApp:
             return
         if time.monotonic() < pending["retry_at"]:
             return
+        if pending.get("reference_revision", self.reference_revision) != self.reference_revision:
+            pending.update(message=self.engine.reminder_message(pending["stage"]),
+                           reference_revision=self.reference_revision)
         claimed = True
         if self.relay:
             try:
@@ -1202,7 +1194,7 @@ class IronWillApp:
             ttk.Button(title_row, text="看第三档", command=lambda: self._show_reminder(3, "你写下的决定仍在这里。回到主线。", preview=True)).pack(side="right")
         line = message if message.strip() else ("这是第三次提醒。回到主线。" if stage >= 3 else "你已经决定了这一轮的主线。现在回去。")
         goal = reference_goal(self._identity()["goal"], self.todos) if preview else self.engine.state.get("goal", "")
-        body = self._text(content, 10)
+        body = self.dialog_body = self._text(content, 10)
         body.insert("1.0", line + "\n\n当前主线：\n" + str(goal))
         if preview and stage >= 3 and self._identity()["oath"]:
             body.insert("end", "\n\n你写下的大愿：\n" + self._identity()["oath"])
@@ -1233,7 +1225,16 @@ class IronWillApp:
         if self.dialog and self.dialog.winfo_exists():
             self.dialog.destroy()
         self.dialog = None
+        self.dialog_body = None
         self.dialog_advisory = False
+
+    def _set_reminder_body(self, message: str, goal: str) -> None:
+        if not self.dialog_body:
+            return
+        self.dialog_body.configure(state="normal")
+        self.dialog_body.delete("1.0", "end")
+        self.dialog_body.insert("1.0", message + "\n\n当前主线：\n" + (goal or "尚未填写长期目标，也没有未完成待办。"))
+        self.dialog_body.configure(state="disabled")
 
     def _dismiss_advisory(self) -> None:
         self._close_reminder()
@@ -1266,6 +1267,8 @@ class IronWillApp:
         ai = "AI 已启用" if self.ai else "AI 离线"
         lock = "锁屏需明确点击" if self.policy.lock_enabled and not self.demo else "锁屏权限关闭"
         self.capability_text.set("%s  ·  %s  ·  %s  ·  自毁保险保留" % (windows, ai, lock))
+        if self.settings_store.read_only:
+            self.capability_text.set(self.capability_text.get() + "  ·  个人配置只读")
         self.api_metric.set(f"{self.ai_api_count} 次")
         self.cache_metric.set(f"{self.ai_cache_hits} 次")
         self._refresh_observation_status()
@@ -1474,8 +1477,7 @@ class IronWillApp:
             self.ai_status.set("AI 设置无效，未连接服务。请检查地址、模型和运行依赖。")
             return
         self.active_cache_mode = self.ai_cache_mode.get() if self.ai_cache_mode.get() in CACHE_MODES else "本工作周期"
-        self.settings.update({"ai_endpoint": endpoint, "ai_model": model, "ai_cache_mode": self.active_cache_mode})
-        if not self._persist_settings():
+        if not self._commit_settings({"ai_endpoint": endpoint, "ai_model": model, "ai_cache_mode": self.active_cache_mode}):
             return
         try:
             if self.remember_api_key.get() and key:
@@ -1885,17 +1887,51 @@ class IronWillApp:
         self.root.destroy()
 
 
-def launch(data_dir: Path, demo: bool = False, auto_start: bool = False) -> int:
+def _startup_error(title: str, text: str) -> None:
+    window = None
     try:
-        root = tk.Tk()
+        window = tk.Tk()
+        window.withdraw()
+        messagebox.showerror(title, text, parent=window)
     except tk.TclError:
-        print("无法打开图形界面。请在有桌面会话且包含 Tk 的 Python 环境运行。")
-        return 2
-    app = IronWillApp(root, data_dir, demo=demo)
-    if auto_start and not demo:
-        root.after(300, app.pause_resume if app.engine.state.get("status") == "paused" else app.start)
-    root.mainloop()
-    return 0
+        print(title + "：" + text)
+    finally:
+        if window is not None:
+            window.destroy()
+
+
+def launch(data_dir: Path, demo: bool = False, auto_start: bool = False) -> int:
+    ownership = None
+    if not demo:
+        try:
+            ownership = DirectoryLock(data_dir)
+            ownership.acquire()
+        except DirectoryBusyError:
+            _startup_error("IronWill 已在运行", "此数据目录已由另一个 IronWill 实例使用。请打开现有窗口或托盘图标；先退出旧实例再启动新版。")
+            return 1
+        except (OSError, ValueError):
+            _startup_error("无法打开数据目录", "无法锁定数据目录，本次未读取或修改配置。请检查目录权限后重试。")
+            return 2
+    root = None
+    try:
+        try:
+            root = tk.Tk()
+        except tk.TclError:
+            print("无法打开图形界面。请在有桌面会话且包含 Tk 的 Python 环境运行。")
+            return 2
+        app = IronWillApp(root, data_dir, demo=demo)
+        if auto_start and not demo:
+            root.after(300, app.pause_resume if app.engine.state.get("status") == "paused" else app.start)
+        root.mainloop()
+        return 0
+    finally:
+        if root is not None:
+            try:
+                root.destroy()
+            except tk.TclError:
+                pass  # Normal close already destroyed Tk.
+        if ownership:
+            ownership.release()
 
 
 def smoke_test() -> dict[str, Any]:

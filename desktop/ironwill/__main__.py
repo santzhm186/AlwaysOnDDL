@@ -33,6 +33,39 @@ def main(argv: list[str] | None = None) -> int:
         try:
             from .app import smoke_test
             result = smoke_test()
+            # Exercise the packaged native lock and settings writer only in temporary folders.
+            import tempfile
+            from .directory_lock import DirectoryBusyError, DirectoryLock
+            from .settings_store import SettingsReadOnly, SettingsStore
+            with tempfile.TemporaryDirectory(prefix="ironwill-storage-check-") as directory:
+                with DirectoryLock(directory):
+                    try:
+                        DirectoryLock(directory).acquire()
+                    except DirectoryBusyError:
+                        pass
+                    else:
+                        raise RuntimeError("Directory ownership was not exclusive")
+                with DirectoryLock(directory):
+                    pass
+                path = Path(directory) / "ui_settings.json"
+                store = SettingsStore(path)
+                store.load()
+                store.save({"goal": "SYNTHETIC-STORAGE-CHECK"})
+                if SettingsStore(path).load().get("goal") != "SYNTHETIC-STORAGE-CHECK":
+                    raise RuntimeError("Settings round trip failed")
+                path.write_bytes(b"invalid-json")
+                protected = SettingsStore(path)
+                protected.load()
+                try:
+                    protected.save({"goal": "must not overwrite"})
+                except SettingsReadOnly:
+                    pass
+                else:
+                    raise RuntimeError("Corrupt settings were writable")
+                if path.read_bytes() != b"invalid-json":
+                    raise RuntimeError("Corrupt settings were overwritten")
+            result["data_directory_lock"] = True
+            result["settings_storage"] = True
             # Verify the optional pairing bundle without opening any network socket.
             import ssl
             import tempfile

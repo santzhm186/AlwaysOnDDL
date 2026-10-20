@@ -226,6 +226,22 @@ class Engine:
             return [self._event("lock_requested", "已收到你的显式锁屏选择。", action_id=uuid.uuid4().hex)]
         return [self._event("error", "未知选择；没有执行任何强制动作。")]
 
+    def update_reference(self, goal: str) -> bool:
+        """Replace a reference without changing the cycle, stage or drift counters."""
+        if not isinstance(goal, str):
+            raise ValueError("Reference goal must be text")
+        if goal == self.state["goal"]:
+            return False
+        self.state["goal"] = goal
+        self.state["recovery_seconds"] = 0.0
+        self._discard_next_tick = True
+        return True
+
+    def reminder_message(self, stage: int) -> str:
+        if type(stage) is not int or not 1 <= stage <= 3:
+            raise ValueError("Invalid reminder stage")
+        return self._message(stage)
+
     def _message(self, stage: int) -> str:
         if stage == 1:
             reality = self.state["reality"]

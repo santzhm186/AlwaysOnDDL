@@ -1,6 +1,6 @@
 # IronWill 桌面端和 Android 开发技术文档
 
-版本：Windows 0.1.7 / Android 0.1.2。更新日期：2026年10月13日。目标：交付可以分别运行、可在可信局域网协同的 Windows 和 Android 首版，并给后续开发提供明确的接口、状态、迁移和验收约束。
+版本：Windows 0.1.8 / Android 0.1.2。更新日期：2026年10月19日。目标：交付可以分别运行、可在可信局域网协同的 Windows 和 Android 首版，并给后续开发提供明确的接口、状态、迁移和验收约束。
 
 0.1.5 / Android 0.1.2 界面更新：统一深色、暖白与青柠色，Windows重排主线卡片、运行计数、规则及连接设置，Android使用原生圆角卡片和输入焦点描边。没有新增依赖，数据格式与监督、权限、AI请求策略保持兼容。截图脚本只使用虚拟数据，可检查四页上下区域与最小尺寸提醒弹窗。
 
@@ -69,6 +69,8 @@ ironwill/
       review_memory.py         工作周期/时长判断记忆与有界原子保存
       goals.py                 待办验证与未完成目标优先的参考文本
       checklist.py             原生Tk清单视图、悬浮图标和弹出清单
+      settings_store.py        配置恢复/只读、字节上限、摘要冲突与原子保存
+      directory_lock.py        标准库OS文件锁，按目录互斥及短时配置写锁
       relay.py                 显式启用的局域网HTTPS接口
     tests/                     状态、AI、平台和同步测试
   android/
@@ -217,9 +219,17 @@ UI为AI请求附加周期ID和配置代次，回应时检查它们仍匹配；�
 
 `WindowsTray`只在用户点击按钮后创建独立线程、隐藏的原生消息窗口和通知区图标。使用ctypes定义指针宽度正确的WNDCLASS/NOTIFYICONDATA，调用系统[Shell_NotifyIconW](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shell_notifyiconw)并设置通知版本。线程不调用Tk，通过现有队列通知ready/restore/exit/error；只有ready后主线程才withdraw。Explorer的TaskbarCreated消息触发图标重建，失败恢复窗口可见；退出请求移除图标、销毁窗口和消息循环。演示模式不启动原生托盘，没有新增第三方依赖。实际Explorer重启、DPI及长期运行仍需验收。
 
+## 6.9 配置与进程所有权（0.1.8）
+
+SettingsStore统一解析已知字段，损坏字段隔离以显示其他可读取内容；任一已知字段无效、读取失败、非法JSON或超限即保护原文件为只读，直到用户修复/恢复后重开。保存前同样验证字段并计算带缩进JSON的UTF-8字节数，最多1MiB；二进制写入确保Windows换行不会使实际字节超过上限。唯一临时文件、flush/fsync及os.replace保留原子性，失败清理临时文件。
+
+正常launch在Tk/应用构造前获得DirectoryLock，Windows用msvcrt锁一字节，其他平台用fcntl；锁覆盖整个mainloop并在异常时释放。数据目录先resolve，别名路径指向同一锁；不同目录独立。保存另持.ironwill-settings.lock，在锁内比对读取时的SHA-256摘要及当前文件，再替换，避免未走launch的写入者丢失更新。摘要不符或写锁忙时拒绝保存，不合并未知版本。锁文件不unlink，进程终止由OS释放；不写PID或用户信息。旧版本未使用新锁，升级前必须退出旧实例。demo不持锁、不写文件。
+
 ## 7 AI 灰区相关性
 
 ### 7.1 输入和输出
+
+0.1.8通过Engine.update_reference更新派生目标，保留周期ID、stage、drift和用户选择，清连续恢复并重建采样基线。UI维护reference_revision，延迟提醒关联该版本；参考变化更新排队文案，已打开真实提醒直接改Text而不lift/重建窗口。旧AI建议仍按ai_generation丢弃。损坏配置只读时不派生新目标或恢复监督，避免把缺失清单当作已完成。
 
 Windows 0.1.7参考目标来自goals.reference_goal：只取未完成todos，全部完成或为空时才取ui_settings.goal（长期目标）。待办与完成标记不进Engine的结果评分；Engine.goal只是当前派生参考文本。每项文本在4000字符总预算内公平分配，完整列表只存本机设置。todo操作及保存长期目标成功后才更新参考，失败回滚；参考改变时增加ai_generation、清除semantic_result/last_ai_details/候选窗口、重置连续恢复与下一次采样基线，保留stage/drift/id/status。旧回包不能用于新目标，review_identity已有goal摘要负责缓存隔离；限频不被勾选动作重置。全完成且长期目标空白时不请求AI，用户仍自行结束周期。
 
@@ -459,7 +469,7 @@ Android首版是供用户自行安装的开发签名APK。实际`build.ps1`通�
 | 边界 | 当前事实与影响 |
 |---|---|
 | 双端功能不对等 | Windows三级；Android包名轻提醒。静默时钟、恢复规则、文本长度和重启策略不同 |
-| 单实例与并发 | 没有Windows单实例互斥。多个进程共用同一数据目录可能覆盖快照，且只能一个实例绑定默认relay端口 |
+| 单实例与并发 | 0.1.8按数据目录持有进程级OS文件锁，配置保存另有写锁和摘要冲突检测；不同目录可独立启动，但默认relay端口仍需协调。0.1.7及更早版本不参与新锁，升级前需退出旧实例 |
 | 数据持久化 | 原子单文件保存，不提供多文件事务、完整选择台账、恢复历史或通用迁移器 |
 | 配对安全 | 共享令牌与固定证书；无逐设备撤销和公网防护，不自动设置防火墙 |
 | 命令与触达回执 | 202只证明入队；通知提交和锁屏API成功都不证明最终触达/锁定 |

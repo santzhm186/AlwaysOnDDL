@@ -8,7 +8,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE_VERSION = "0.1.7"
+SOURCE_VERSION = "0.1.8"
 SKIP_PARTS = {"build", "dist", "__pycache__", ".git", ".gradle", ".idea", ".venv", ".venv-build", "secrets", "pairing", "logs"}
 SUFFIXES = {".py", ".java", ".md", ".txt", ".ps1", ".xml", ".gradle", ".properties"}
 
