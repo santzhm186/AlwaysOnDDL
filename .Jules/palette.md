@@ -4,3 +4,9 @@
 ## 2026-10-12 - Tkinter destructive actions missing confirmation dialogues
 **Learning:** Destructive actions such as deleting saved keys or clearing caches did not have confirmation dialogs.
 **Action:** Add `messagebox.askyesno` before taking destructive actions.
+## 2026-10-13 - Tkinter tk.Text widgets trap focus by default
+**Learning:** By default, Tkinter's `tk.Text` widget handles `<Tab>` by inserting a tab character rather than yielding focus. This prevents keyboard-only users from navigating beyond the text widget.
+**Action:** When instantiating `tk.Text` widgets, bind `<Tab>` and `<Shift-Tab>` to `tk_focusNext().focus_set()` and `tk_focusPrev().focus_set()` respectively, returning 'break' to avoid default tab behavior and allow normal focus navigation.
+## 2026-10-13 - Tkinter Shift-Tab cross-platform binding
+**Learning:** On Linux/X11, Shift+Tab is often registered as `<ISO_Left_Tab>` rather than `<Shift-Tab>`.
+**Action:** When binding Shift+Tab behavior in Tkinter, also bind `<ISO_Left_Tab>` alongside `<Shift-Tab>` for full cross-platform support.
