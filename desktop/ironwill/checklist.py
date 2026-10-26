@@ -38,6 +38,8 @@ class TodoListView(ttk.Frame):
                 label = ttk.Label(frame, wraplength=240, style="Card.TLabel", cursor="hand2")
                 label.grid(row=0, column=1, sticky="ew")
                 label.bind("<Button-1>", lambda _event, key=identifier, var=value: self.on_toggle(key, not var.get()))
+                check.bind("<FocusIn>", lambda _event, l=label: l.configure(foreground=ACCENT))
+                check.bind("<FocusOut>", lambda _event, l=label, i=identifier: l.configure(foreground=MUTED if self.rows[i]["value"].get() else ""))
                 controls = ttk.Frame(frame, style="Card.TFrame")
                 controls.grid(row=0, column=2, sticky="ne", padx=(8, 0))
                 if self.on_edit:
@@ -105,6 +107,8 @@ class FloatingChecklist:
         self.canvas.bind("<ButtonPress-1>", self._press)
         self.canvas.bind("<B1-Motion>", self._motion)
         self.canvas.bind("<ButtonRelease-1>", self._release)
+        self.canvas.bind("<FocusIn>", lambda _event: self.canvas.itemconfigure(self.badge, fill=ACCENT))
+        self.canvas.bind("<FocusOut>", lambda _event: self.canvas.itemconfigure(self.badge, fill=BG))
         self.canvas.bind("<Return>", lambda _event: self.toggle_popup())
         self.canvas.bind("<space>", lambda _event: self.toggle_popup())
         self.canvas.bind("<Escape>", lambda _event: self.hide_popup())

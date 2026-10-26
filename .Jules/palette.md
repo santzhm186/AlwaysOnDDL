@@ -10,3 +10,6 @@
 ## 2026-10-13 - Tkinter Shift-Tab cross-platform binding
 **Learning:** On Linux/X11, Shift+Tab is often registered as `<ISO_Left_Tab>` rather than `<Shift-Tab>`.
 **Action:** When binding Shift+Tab behavior in Tkinter, also bind `<ISO_Left_Tab>` alongside `<Shift-Tab>` for full cross-platform support.
+## 2026-10-14 - Keyboard focus indicators for checklists
+**Learning:** In list views where labels describe interactive elements like checkboxes, screen reader users and keyboard navigators benefit from visual focus indicators specifically on the descriptive label when the interactive element receives focus. Using `check.bind("<FocusIn>")` and `<FocusOut>` to change label foreground colors makes keyboard navigation much clearer.
+**Action:** Add `<FocusIn>` and `<FocusOut>` bindings to interactive Tkinter elements to provide clear visual feedback on adjacent labels during keyboard navigation.
