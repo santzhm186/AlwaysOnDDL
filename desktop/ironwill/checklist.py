@@ -38,6 +38,10 @@ class TodoListView(ttk.Frame):
                 label = ttk.Label(frame, wraplength=240, style="Card.TLabel", cursor="hand2")
                 label.grid(row=0, column=1, sticky="ew")
                 label.bind("<Button-1>", lambda _event, key=identifier, var=value: self.on_toggle(key, not var.get()))
+
+                check.bind("<FocusIn>", lambda _event, l=label: l.configure(foreground=ACCENT))
+                check.bind("<FocusOut>", lambda _event, l=label: l.configure(foreground=""))
+
                 controls = ttk.Frame(frame, style="Card.TFrame")
                 controls.grid(row=0, column=2, sticky="ne", padx=(8, 0))
                 if self.on_edit:
@@ -94,7 +98,9 @@ class FloatingChecklist:
             background = BG
         self.canvas = tk.Canvas(icon, width=48, height=48, bg=background, highlightthickness=0, takefocus=True)
         self.canvas.pack()
-        self.canvas.create_oval(2, 2, 46, 46, fill=ACCENT, outline=LINE)
+        self.oval = self.canvas.create_oval(2, 2, 46, 46, fill=ACCENT, outline=LINE)
+        self.canvas.bind("<FocusIn>", lambda _event: self.canvas.itemconfigure(self.oval, outline=FG))
+        self.canvas.bind("<FocusOut>", lambda _event: self.canvas.itemconfigure(self.oval, outline=LINE))
         for y in (15, 23, 31):
             self.canvas.create_rectangle(12, y - 2, 16, y + 2, fill=BG, outline="")
             self.canvas.create_line(21, y, 35, y, fill=BG, width=2)

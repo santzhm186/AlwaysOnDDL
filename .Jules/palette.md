@@ -10,3 +10,6 @@
 ## 2026-10-13 - Tkinter Shift-Tab cross-platform binding
 **Learning:** On Linux/X11, Shift+Tab is often registered as `<ISO_Left_Tab>` rather than `<Shift-Tab>`.
 **Action:** When binding Shift+Tab behavior in Tkinter, also bind `<ISO_Left_Tab>` alongside `<Shift-Tab>` for full cross-platform support.
+## 2026-10-15 - Explicit Focus Indicators for Tkinter
+**Learning:** Default Tkinter focus rings (e.g. for `ttk.Checkbutton` and `tk.Canvas`) can be missing or indistinct, particularly in custom-themed applications, reducing accessibility for keyboard users.
+**Action:** Enhance keyboard accessibility by manually adding `<FocusIn>` and `<FocusOut>` event bindings to these widgets (and adjacent text labels) to change their color/style explicitly on focus.
