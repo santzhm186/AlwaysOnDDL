@@ -97,8 +97,8 @@ class FloatingChecklist:
         self.canvas = tk.Canvas(icon, width=48, height=48, bg=background, highlightthickness=0, takefocus=True)
         self.canvas.pack()
         self.oval = self.canvas.create_oval(2, 2, 46, 46, fill=ACCENT, outline=LINE)
-        self.canvas.bind("<FocusIn>", lambda _event: self.canvas.itemconfigure(self.oval, outline=ACCENT))
-        self.canvas.bind("<FocusOut>", lambda _event: self.canvas.itemconfigure(self.oval, outline=LINE))
+        self.canvas.bind("<FocusIn>", lambda _event: self.canvas.itemconfigure(self.oval, outline=BG, width=3))
+        self.canvas.bind("<FocusOut>", lambda _event: self.canvas.itemconfigure(self.oval, outline=LINE, width=1))
         for y in (15, 23, 31):
             self.canvas.create_rectangle(12, y - 2, 16, y + 2, fill=BG, outline="")
             self.canvas.create_line(21, y, 35, y, fill=BG, width=2)
