@@ -47,6 +47,8 @@ class TodoListView(ttk.Frame):
                     ttk.Button(controls, text="移除", style="Small.TButton",
                                command=lambda key=identifier: self.on_remove(key)).pack(side="left")
                 label.bind("<Configure>", lambda event, widget=label: widget.configure(wraplength=max(100, event.width)))
+                check.bind("<FocusIn>", lambda _event, w=label: w.configure(foreground=ACCENT))
+                check.bind("<FocusOut>", lambda _event, w=label: w.configure(foreground=""))
                 self.rows[identifier] = {"frame": frame, "value": value, "label": label, "check": check}
             row = self.rows[identifier]
             row["value"].set(item["done"])
@@ -94,7 +96,9 @@ class FloatingChecklist:
             background = BG
         self.canvas = tk.Canvas(icon, width=48, height=48, bg=background, highlightthickness=0, takefocus=True)
         self.canvas.pack()
-        self.canvas.create_oval(2, 2, 46, 46, fill=ACCENT, outline=LINE)
+        self.oval = self.canvas.create_oval(2, 2, 46, 46, fill=ACCENT, outline=LINE)
+        self.canvas.bind("<FocusIn>", lambda _event: self.canvas.itemconfigure(self.oval, outline=ACCENT))
+        self.canvas.bind("<FocusOut>", lambda _event: self.canvas.itemconfigure(self.oval, outline=LINE))
         for y in (15, 23, 31):
             self.canvas.create_rectangle(12, y - 2, 16, y + 2, fill=BG, outline="")
             self.canvas.create_line(21, y, 35, y, fill=BG, width=2)
