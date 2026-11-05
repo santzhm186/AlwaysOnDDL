@@ -13,3 +13,6 @@
 ## 2026-10-14 - Tkinter Checkbutton and Canvas lack explicit default focus rings
 **Learning:** Default Tkinter widgets like `ttk.Checkbutton` and custom icon components using `tk.Canvas` lack clear visual focus rings, which creates an accessibility issue for keyboard users relying on tab navigation. Standard configuration settings (`highlightthickness`) are often insufficient or suppressed by custom styling.
 **Action:** Bind `<FocusIn>` and `<FocusOut>` events to these elements to explicitly manipulate styling (e.g., adjacent label text color or canvas object outlines) to ensure focus visibility.
+## 2024-03-24 - Focus Indicators on Checkbuttons
+**Learning:** Tkinter themed widgets (ttk) often lack explicit visual focus indicators by default, especially in dark mode themes. This makes keyboard navigation difficult as users can't see which widget has focus.
+**Action:** Map the focus state in the style configuration (e.g., `style.map('TCheckbutton', foreground=[('focus', ACCENT)])`) to provide clear visual feedback for keyboard accessibility.
