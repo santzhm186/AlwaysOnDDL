@@ -211,7 +211,7 @@ class IronWillApp:
         style.map("TCombobox", fieldbackground=[("readonly", FIELD)], foreground=[("readonly", FG)],
                   selectbackground=[("readonly", FIELD)], selectforeground=[("readonly", FG)])
         style.configure("TCheckbutton", background=BG, foreground=FG)
-        style.map("TCheckbutton", background=[("active", BG)])
+        style.map("TCheckbutton", background=[("active", BG)], foreground=[("focus", ACCENT)])
         style.configure("TNotebook", background=BG, borderwidth=0, bordercolor=BG, lightcolor=BG, darkcolor=BG, tabmargins=(0, 0, 0, 0))
         style.configure("TNotebook.Tab", background=BG, foreground=MUTED, padding=(25, 12), borderwidth=0,
                         lightcolor=BG, darkcolor=BG)
@@ -230,7 +230,7 @@ class IronWillApp:
         for name in ("TLabel", "Muted.TLabel", "Accent.TLabel", "Warning.TLabel", "Heading.TLabel", "Eyebrow.TLabel", "Metric.TLabel"):
             style.configure("Card." + name, background=PANEL)
         style.configure("Card.TCheckbutton", background=PANEL)
-        style.map("Card.TCheckbutton", background=[("active", PANEL)])
+        style.map("Card.TCheckbutton", background=[("active", PANEL)], foreground=[("focus", ACCENT)])
 
     def _card(self, parent: tk.Misc, padding=18) -> ttk.Frame:
         return ttk.Frame(parent, style="Card.TFrame", padding=padding)
