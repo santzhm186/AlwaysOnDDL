@@ -13,3 +13,6 @@
 ## 2026-10-14 - Tkinter Checkbutton and Canvas lack explicit default focus rings
 **Learning:** Default Tkinter widgets like `ttk.Checkbutton` and custom icon components using `tk.Canvas` lack clear visual focus rings, which creates an accessibility issue for keyboard users relying on tab navigation. Standard configuration settings (`highlightthickness`) are often insufficient or suppressed by custom styling.
 **Action:** Bind `<FocusIn>` and `<FocusOut>` events to these elements to explicitly manipulate styling (e.g., adjacent label text color or canvas object outlines) to ensure focus visibility.
+## 2026-10-15 - Tkinter TCombobox missing explicit default focus ring
+**Learning:** Default Tkinter widgets like `ttk.Combobox` in the clam theme lack clear visual focus rings, which creates an accessibility issue for keyboard users relying on tab navigation.
+**Action:** Bind `bordercolor` to explicit focus state in the style map (e.g. `style.map('TCombobox', bordercolor=[('focus', ACCENT)])`) to ensure focus visibility.
