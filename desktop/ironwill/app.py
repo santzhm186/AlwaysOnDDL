@@ -196,13 +196,13 @@ class IronWillApp:
         style.configure("Eyebrow.TLabel", foreground=ACCENT, font=("Segoe UI", 9, "bold"))
         style.configure("Metric.TLabel", foreground=FG, font=("Microsoft YaHei UI", 16, "bold"))
         style.configure("Badge.TLabel", background="#2b3523", foreground=ACCENT, padding=(12, 7))
-        style.configure("TButton", background="#29332d", foreground=FG, padding=(15, 10), borderwidth=0, focusthickness=1)
+        style.configure("TButton", background="#29332d", foreground=FG, padding=(15, 10), borderwidth=1, bordercolor=LINE, focusthickness=1)
         style.map("TButton", background=[("disabled", "#202722"), ("pressed", "#3d4b40"), ("active", "#354239")],
-                  foreground=[("disabled", "#829087")])
-        style.configure("Primary.TButton", background=ACCENT, foreground=BG, font=("Microsoft YaHei UI", 10, "bold"))
+                  foreground=[("disabled", "#829087")], bordercolor=[("focus", ACCENT)])
+        style.configure("Primary.TButton", background=ACCENT, foreground=BG, font=("Microsoft YaHei UI", 10, "bold"), borderwidth=1, bordercolor=ACCENT)
         style.configure("Small.TButton", padding=(8, 4), font=("Microsoft YaHei UI", 9))
         style.map("Primary.TButton", background=[("disabled", "#323d27"), ("pressed", "#bbd45a"), ("active", "#e4fa92")],
-                  foreground=[("disabled", "#9aa58f"), ("!disabled", BG)])
+                  foreground=[("disabled", "#9aa58f"), ("!disabled", BG)], bordercolor=[("focus", FG)])
         style.configure("TEntry", fieldbackground=FIELD, foreground=FG, insertcolor=FG, padding=(10, 9), borderwidth=1,
                         lightcolor=LINE, darkcolor=LINE, bordercolor=LINE)
         style.map("TEntry", fieldbackground=[("readonly", FIELD)], bordercolor=[("focus", ACCENT)])
@@ -217,7 +217,7 @@ class IronWillApp:
         style.configure("TNotebook.Tab", background=BG, foreground=MUTED, padding=(25, 12), borderwidth=0,
                         lightcolor=BG, darkcolor=BG)
         style.map("TNotebook.Tab", background=[("selected", PANEL), ("active", "#242e27")],
-                  foreground=[("selected", ACCENT), ("active", FG)], lightcolor=[("selected", PANEL)],
+                  foreground=[("focus", ACCENT), ("selected", ACCENT), ("active", FG)], lightcolor=[("selected", PANEL)],
                   padding=[("selected", (25, 12)), ("!selected", (25, 12))], expand=[("selected", (0, 0, 0, 0))])
         style.configure("TLabelframe", background=BG, bordercolor=LINE)
         style.configure("TLabelframe.Label", background=BG, foreground=FG)
