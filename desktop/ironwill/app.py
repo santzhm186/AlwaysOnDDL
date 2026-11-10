@@ -209,6 +209,7 @@ class IronWillApp:
         style.configure("TCombobox", fieldbackground=FIELD, background=PANEL, foreground=FG, arrowcolor=MUTED, padding=7,
                         lightcolor=LINE, darkcolor=LINE, bordercolor=LINE)
         style.map("TCombobox", fieldbackground=[("readonly", FIELD)], foreground=[("readonly", FG)],
+                  bordercolor=[("focus", ACCENT)],
                   selectbackground=[("readonly", FIELD)], selectforeground=[("readonly", FG)])
         style.configure("TCheckbutton", background=BG, foreground=FG)
         style.map("TCheckbutton", background=[("active", BG)], foreground=[("focus", ACCENT)])
