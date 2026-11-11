@@ -16,3 +16,6 @@
 ## 2026-10-15 - Tkinter TCombobox missing explicit default focus ring
 **Learning:** Default Tkinter widgets like `ttk.Combobox` in the clam theme lack clear visual focus rings, which creates an accessibility issue for keyboard users relying on tab navigation.
 **Action:** Bind `bordercolor` to explicit focus state in the style map (e.g. `style.map('TCombobox', bordercolor=[('focus', ACCENT)])`) to ensure focus visibility.
+## 2026-10-16 - Tkinter Button and Notebook focus rings
+**Learning:** Default Tkinter widgets like `ttk.Button` and `TNotebook.Tab` lack explicit visual focus indicators in some themes.
+**Action:** Bind `bordercolor` (or `foreground`) to the explicit focus state in the style map (e.g. `style.map('TButton', bordercolor=[('focus', ACCENT)])`) and ensure a `borderwidth` is configured to ensure focus visibility.
