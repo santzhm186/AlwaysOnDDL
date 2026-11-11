@@ -180,6 +180,8 @@ class IronWillApp:
         # An option-database *Font overrides individual ttk typography on Windows.
         for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
             tkfont.nametofont(name).configure(family="Microsoft YaHei UI", size=10)
+        self.root.option_add('*TButton.cursor', 'hand2')
+        self.root.option_add('*TCheckbutton.cursor', 'hand2')
         style = ttk.Style(self.root)
         style.theme_use("clam")
         style.configure(".", background=BG, foreground=FG, font=("Microsoft YaHei UI", 10),
