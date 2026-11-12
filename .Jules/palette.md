@@ -19,3 +19,6 @@
 ## 2026-10-16 - Tkinter Button and Notebook focus rings
 **Learning:** Default Tkinter widgets like `ttk.Button` and `TNotebook.Tab` lack explicit visual focus indicators in some themes.
 **Action:** Bind `bordercolor` (or `foreground`) to the explicit focus state in the style map (e.g. `style.map('TButton', bordercolor=[('focus', ACCENT)])`) and ensure a `borderwidth` is configured to ensure focus visibility.
+## 2026-10-17 - Tkinter interactive elements missing pointer cursor
+**Learning:** Default Tkinter widgets like `ttk.Button` and `ttk.Checkbutton` do not show a pointer cursor on hover in some platforms, reducing the perceived affordance of interactivity.
+**Action:** Use the Tk option database (e.g., `root.option_add("*TButton.cursor", "hand2")`) to explicitly set the cursor on all instances of a widget class to explicitly ensure pointer feedback.
